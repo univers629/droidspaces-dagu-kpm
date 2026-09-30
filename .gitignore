@@ -1,0 +1,43 @@
+# Local operating instructions and live device state
+/AGENTS.md
+/PROJECT_STATE.json
+/.agents/
+/.venv*/
+/artifacts/
+/evidence/
+/vendor/
+
+# Keep the published source tree focused; legacy probes and one-off tooling stay local
+/src/*
+!/src/dagu_v02/
+/tools/*
+!/tools/public/
+/tools/public/*
+!/tools/public/build_namespace_tests.py
+
+# The current docs directory contains device-specific handoff and research notes.
+# Only reviewed, stable public guides are allow-listed here.
+/docs/*
+!/docs/ARCHITECTURE.md
+!/docs/DEVELOPMENT.md
+!/docs/LIMITATIONS.md
+!/docs/VALIDATION.md
+
+# Local build output, interpreter caches, and generated kernel/device binaries
+**/__pycache__/
+**/build/
+*.py[cod]
+*.o
+*.elf
+*.kpm
+*.ko
+*.img
+*.zip
+*.tar
+*.tar.gz
+*.xz
+*.bin
+
+# Unexpected temporary files found in the local workspace
+/System.Management.Automation.Internal.Host.InternalHost
+/temp.gz

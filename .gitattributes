@@ -1,0 +1,11 @@
+* text=auto eol=lf
+*.bin -text
+*.elf -text
+*.img -text
+*.ko -text
+*.kpm -text
+*.o -text
+*.tar -text
+*.tar.gz -text
+*.xz -text
+*.zip -text
