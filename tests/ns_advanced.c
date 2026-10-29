@@ -319,9 +319,12 @@ static int check_clone3(void)
     }
     if (child == 0) {
         char pid_ns[128], nspid[512];
-        int ok = getpid() == 1 && ns_link_for(0, "pid", pid_ns, sizeof(pid_ns)) == 0 &&
+        /* Bionic caches getpid(); use the raw syscall like check_clone_pid does. */
+        pid_t kernel_pid = raw_getpid();
+        int ok = kernel_pid == 1 && ns_link_for(0, "pid", pid_ns, sizeof(pid_ns)) == 0 &&
                  read_nspid(nspid, sizeof(nspid)) == 0 && nspid_last_is_one(nspid);
-        printf("clone3_child_pid=%ld pidns=%s %s", (long)getpid(), pid_ns, nspid);
+        printf("clone3_child_pid=%ld libc_getpid=%ld pidns=%s %s",
+               (long)kernel_pid, (long)getpid(), pid_ns, nspid);
         fflush(stdout);
         _exit(ok ? 0 : 12);
     }

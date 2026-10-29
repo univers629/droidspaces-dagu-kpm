@@ -177,20 +177,39 @@ long dagu_msgget(int key, int flags)
             }
             continue;
         }
-        candidate->next = (struct dagu_msg_queue *)ns->queues;
-        candidate->first = 0;
-        candidate->last = 0;
-        candidate->id = (int)ns->next_queue_id++;
-        candidate->key = key;
-        candidate->mode = (unsigned int)(flags & 0777);
-        candidate->count = 0;
-        candidate->bytes = 0;
-        candidate->limit = DAGU_MSGMNB;
-        candidate->stime = 0;
-        candidate->rtime = 0;
-        candidate->ctime = now_ptr();
-        candidate->lspid = 0;
-        candidate->lrpid = 0;
+        /*
+         * Field-at-a-time volatile writes keep the compiler from merging
+         * adjacent constants into a .rodata.cst pool load (adrp plus a wide
+         * load).
+         *
+         * The KPM loader relocates sections to distinct offsets within
+         * mod->start, but the adrp displacement baked in by the linker is
+         * computed relative to the link-time .text base and is not recomputed
+         * after relocation. Every constant pool load then reads from the
+         * wrong address and returns zero, so limit was 0 at runtime instead
+         * of DAGU_MSGMNB and msgsnd always returned EAGAIN.
+         */
+        {
+            volatile unsigned long *raw = (volatile unsigned long *)candidate;
+            unsigned long zero_i;
+            candidate->next = (struct dagu_msg_queue *)ns->queues;
+            for (zero_i = 0; zero_i < sizeof(*candidate) / sizeof(unsigned long); zero_i++)
+                raw[zero_i] = 0UL;
+            candidate->first = 0;
+            candidate->last = 0;
+            candidate->id = (int)ns->next_queue_id++;
+            candidate->key = key;
+            candidate->mode = (unsigned int)(flags & 0777);
+            candidate->count = 0;
+            *(volatile unsigned long *)&candidate->bytes = 0UL;
+            *(volatile unsigned long *)&candidate->limit = DAGU_MSGMNB;
+            candidate->stime = 0;
+            candidate->rtime = 0;
+            candidate->ctime = now_ptr();
+            candidate->lspid = 0;
+            candidate->lrpid = 0;
+            __asm__ volatile("dsb sy" ::: "memory");
+        }
         ns->queues = candidate;
         result = candidate->id;
         candidate = 0;

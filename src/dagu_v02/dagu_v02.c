@@ -2,6 +2,7 @@
 /* Droidspaces fake PID/IPC namespace adapter for this dagu boot. */
 
 #include "abi.h"
+#include "clone3.h"
 #include "ipc_namespace.h"
 #include "msg_core.h"
 #include "msg_syscalls.h"
@@ -27,12 +28,46 @@
 
 #define DAGU_MODULE_NAME "ds-dagu-abi-probe"
 #define DAGU_EBUSY 16L
+
+/*
+ * ---- KernelPatch loader ABI retargeting ----------------------------------
+ * These values are tied to the *exact* KernelPatch KPImg build that loads the
+ * KPM. They can be overridden at compile time with -D so one source tree can
+ * target several loader versions:
+ *
+ *   KernelPatch  kpver   unload_module - hook_syscalln   prologue[3]
+ *   0.13.3       0xd03   0x3e00                          0xb4000c00
+ *   0.13.5(-2)   0xd05   0x3920                          0xb4000c00
+ *   0.13.14      0xd0e   0x3d00                          0xb4000c00
+ *
+ * prologue[0..2] are 0xa9bb7bfd / 0x910003fd / 0xa9025bf5 on all three.
+ * Derive new values from a kpimg.elf with tools/kpm_retarget.py.
+ * --------------------------------------------------------------------------
+ */
+#ifndef DAGU_KP_VER
+#define DAGU_KP_VER 0xd03U
+#endif
+
+/* historical absolute pair kept for reference; only the delta is used */
+#ifndef DAGU_KP_HOOK_SYSCALLN_LINK
 #define DAGU_KP_HOOK_SYSCALLN_LINK 0x20270UL
-#define DAGU_KP_UNLOAD_MODULE_LINK 0x24070UL
+#endif
+#ifndef DAGU_KP_UNLOAD_MODULE_DELTA
+#define DAGU_KP_UNLOAD_MODULE_DELTA 0x3e00UL
+#endif
+
+#ifndef DAGU_KP_UNLOAD_MODULE_PROLOGUE_0
 #define DAGU_KP_UNLOAD_MODULE_PROLOGUE_0 0xa9bb7bfdU
+#endif
+#ifndef DAGU_KP_UNLOAD_MODULE_PROLOGUE_1
 #define DAGU_KP_UNLOAD_MODULE_PROLOGUE_1 0x910003fdU
+#endif
+#ifndef DAGU_KP_UNLOAD_MODULE_PROLOGUE_2
 #define DAGU_KP_UNLOAD_MODULE_PROLOGUE_2 0xa9025bf5U
+#endif
+#ifndef DAGU_KP_UNLOAD_MODULE_PROLOGUE_3
 #define DAGU_KP_UNLOAD_MODULE_PROLOGUE_3 0xb4000c00U
+#endif
 
 KPM_NAME(DAGU_MODULE_NAME);
 KPM_VERSION("0.3.0-dev1");
@@ -77,8 +112,7 @@ static void before_unload_module(hook_fargs2_t *args, void *unused)
  */
 static int install_unload_guard(void)
 {
-    const unsigned long link_delta = DAGU_KP_UNLOAD_MODULE_LINK -
-                                     DAGU_KP_HOOK_SYSCALLN_LINK;
+    const unsigned long link_delta = DAGU_KP_UNLOAD_MODULE_DELTA;
     unsigned long anchor = symbol_lookup_name("hook_syscalln");
     unsigned long target;
     volatile const unsigned int *insn;
@@ -121,6 +155,7 @@ static void partial_cleanup(void)
         unload_hook_target = 0;
     }
     dagu_reboot_syscalls_uninstall();
+    dagu_clone3_uninstall();
     dagu_msg_syscalls_uninstall();
     dagu_status_bridge_uninstall();
     dagu_proc_bridge_uninstall();
@@ -141,7 +176,7 @@ static long dagu_v02_init(const char *args, const char *event, void *reserved)
     (void)args;
     (void)reserved;
 
-    if ((kver & 0xffff00U) != VERSION(4, 19, 0) || kpver != 0xd03U ||
+    if ((kver & 0xffff00U) != VERSION(4, 19, 0) || kpver != DAGU_KP_VER ||
         !string_equals(event, "pre-kernel-init"))
         return -95;
     if (!kallsyms_lookup_name)
@@ -185,6 +220,17 @@ static long dagu_v02_init(const char *args, const char *event, void *reserved)
     stage = "message syscalls";
     if ((rc = dagu_msg_syscalls_install()))
         goto fail;
+    /*
+     * This kernel has no sys_clone3, so clone3.c supplies one through
+     * _do_fork. Failure is non-fatal: without _do_fork the syscall keeps
+     * returning ENOSYS and the rest of the container path is unaffected,
+     * so a warning is logged instead of unwinding.
+     */
+    stage = "clone3 via _do_fork";
+    rc = dagu_clone3_install();
+    if (rc)
+        logkw("ds-dagu-v02: clone3 unavailable rc=%d; leaving ENOSYS\n", rc);
+    rc = 0;
     stage = "reboot syscall isolation";
     if ((rc = dagu_reboot_syscalls_install()))
         goto fail;

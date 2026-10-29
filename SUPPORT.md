@@ -16,4 +16,4 @@
 
 ## 明确不支持的范围
 
-完整 `_patchHarmony` 功能对等、`clone3`、SysV semaphore/shared memory、POSIX message queue、user namespace 沙箱、devtmpfs 硬件访问和并发容器唯一性目前不属于已验证支持范围。请先查阅 README 中的限制，再提交相关问题。
+完整 `_patchHarmony` 功能对等、SysV semaphore/shared memory、POSIX message queue、user namespace 沙箱、devtmpfs 硬件访问和并发容器唯一性目前不属于已验证支持范围。请先查阅 README 中的限制，再提交相关问题。

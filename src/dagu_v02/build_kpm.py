@@ -23,6 +23,7 @@ SOURCES = (
     "msg_core.c",
     "usercopy.c",
     "msg_syscalls.c",
+    "clone3.c",
     "reboot_syscalls.c",
     "pid_exit_guard.c",
     "pid_namespace.c",
@@ -33,6 +34,13 @@ SOURCES = (
 )
 OUT = PROJECT / "build"
 KPM = OUT / "ds_dagu_v02_v0.3.0-dev1.kpm"
+
+# Retarget the loader ABI without editing the source:
+#   KPM_DEFINES="DAGU_KP_VER=0xd0e DAGU_KP_UNLOAD_MODULE_DELTA=0x3d00" python3 build_kpm.py
+EXTRA_DEFINES = [d for d in os.environ.get("KPM_DEFINES", "").split() if d]
+KPM_NAME_ENV = os.environ.get("KPM_NAME")
+if KPM_NAME_ENV:
+    KPM = OUT / KPM_NAME_ENV
 
 
 def run(*args: str) -> str:
@@ -67,6 +75,7 @@ def main() -> None:
             "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror",
             "-ffreestanding", "-fno-builtin", "-fno-stack-protector",
             "-fno-pic", "-fno-PIE", "-mno-outline-atomics",
+            *(f"-D{d}" for d in EXTRA_DEFINES),
             *(f"-I{path}" for path in includes), "-c", str(source), "-o", str(obj))
         symbols = run(str(llvm_readelf), "-s", str(obj))
         if "__aarch64_" in symbols:

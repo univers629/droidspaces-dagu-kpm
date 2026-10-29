@@ -28,8 +28,21 @@
 | PID `setns()` 扩展路径 | 通过（记录的组合） | 覆盖 holder 创建 fake `pid_for_children` 后 host setns 再 fork PID 1；不覆盖任意组合 |
 | Droidspaces v6.6.0 流程 | 通过（两轮串行） | MUST HAVE PID/IPC 检查通过；容器 create/run/enter/stop/destroy 两轮完成；不覆盖并发容器 |
 
+## 2026-10-29 增量验证（clone3 与 SysV 消息队列）
+
+测试环境为 Xiaomi dagu（Android 14，Linux `4.19.157-perf-gb57830672689`），
+通过 fastboot 临时启动带本 KPM 的 boot 镜像（KPImg 0.13.14，另含 selinux KPM）。
+
+| 范围 | 结果 | 边界 |
+| --- | --- | --- |
+| `clone3`（435 号） | 通过 | 空 flags / SIGCHLD / `CLONE_THREAD\|CLONE_VM` / 独立 stack / `CLONE_NEWPID\|CLONE_NEWIPC`（子进程 raw pid=1）；`size=0/4/89`、`stack_size` 未对齐、缺少 `stack` 均返回 EINVAL；15000 次混合 syscall 无异常。只覆盖 AArch64，compat 路径未测 |
+| SysV 消息队列 | 通过 | `msgget`、`msgsnd`、`msgrcv`、`msgctl(STAT\|SET\|RMID)`；`ns_smoke ipc_object` 覆盖 host 与 fake IPC namespace 的同 key 隔离及跨 namespace 不可见 |
+| PID/IPC namespace 回归 | 通过 | `ns_smoke pid/ipc`、`ns_advanced clone_pid/clone3/stress`、`ns_setns_pid_for_children`、`ns_setns_pid_ancestry`、`ns_setns_ipc_matrix`、`ns_setns_pid_ipc_orders` 十项全部 exit=0 |
+
+未覆盖：SysV 信号量与共享内存、POSIX 消息队列（`semget`、`shmget`、`mq_open` 仍返回 ENOSYS）、user namespace、`devtmpfs`。
+
 ## 未实现或未验收
 
-`clone3`、SysV semaphore/shared memory、POSIX message queue 尚未实现。`devtmpfs` 使用 tmpfs 回退，硬件访问未验；user namespace 沙箱未启用。完整 `_patchHarmony` 对等、并发容器 namespace 唯一性和任意 `setns()` 组合不在本次通过范围。
+SysV semaphore/shared memory 与 POSIX message queue 尚未实现。`devtmpfs` 使用 tmpfs 回退，硬件访问未验证；user namespace 沙箱未启用。完整 `_patchHarmony` 对等、并发容器 namespace 唯一性和任意 `setns()` 组合不在本次通过范围。
 
 公开复验入口见 [开发指南](DEVELOPMENT.md)。构建测试 helper 不会自动连接设备或刷写 boot；设备行为测试必须在兼容的专用测试设备上由所有者自行执行。

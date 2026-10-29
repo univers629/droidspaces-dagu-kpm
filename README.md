@@ -12,7 +12,7 @@ v0.2.0 候选版本已在一台 dagu Android 15 / Linux 4.19.157 设备上完成
 
 当前明确限制：
 
-- `clone3`、SysV semaphore/shared memory 和 POSIX message queue 尚未实现。
+- SysV semaphore/shared memory 和 POSIX message queue 尚未实现。
 - synthetic user namespace 与通用 `devtmpfs`/硬件访问未实现；本项目不提供 user namespace 沙箱。
 - 任意 `setns()` 组合、无限并发规模和完整 `_patchHarmony` 功能对等尚未验证。
 
