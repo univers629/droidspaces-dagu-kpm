@@ -39,10 +39,22 @@
 | SysV 消息队列 | 通过 | `msgget`、`msgsnd`、`msgrcv`、`msgctl(STAT\|SET\|RMID)`；`ns_smoke ipc_object` 覆盖 host 与 fake IPC namespace 的同 key 隔离及跨 namespace 不可见 |
 | PID/IPC namespace 回归 | 通过 | `ns_smoke pid/ipc`、`ns_advanced clone_pid/clone3/stress`、`ns_setns_pid_for_children`、`ns_setns_pid_ancestry`、`ns_setns_ipc_matrix`、`ns_setns_pid_ipc_orders` 十项全部 exit=0 |
 
-未覆盖：SysV 信号量与共享内存、POSIX 消息队列（`semget`、`shmget`、`mq_open` 仍返回 ENOSYS）、user namespace、`devtmpfs`。
+未覆盖：SysV 信号量与共享内存、POSIX 消息队列（`semget`、`shmget`、`mq_open` 仍返回 ENOSYS）、user namespace。
+
+### devtmpfs 文件系统类型
+
+| 范围 | 结果 | 边界 |
+| --- | --- | --- |
+| 类型注册 | 通过 | 基于 `shmem_fs_type` 复制并改名后注册，`/proc/filesystems` 出现 `nodev devtmpfs` |
+| 挂载 | 通过 | `mount -t devtmpfs` 返回 0，挂载点以 `devtmpfs` 类型出现在 `/proc/self/mounts` |
+| 节点创建 | 通过 | 在挂载实例上按 `/sys/class/*/*/dev` 枚举创建 559 个字符设备节点，均可打开；`null`、`zero`、`random`、`kmsg`、`fuse`、`tun`、`ashmem`、`ion` 可用，`kgsl-3d0` 读出驱动标识 |
+| 容器端到端 | 通过 | `droidspaces --hw-access` 启动容器后，容器内 `/dev` 以 `devtmpfs` 类型挂载，含 32 个节点；`head /dev/kgsl-3d0` 返回驱动标识，写 `/dev/null` 成功 |
+| PID/IPC 回归 | 通过 | `ns_smoke pid/ipc/ipc_object`、`ns_advanced clone3` 在含 devtmpfs 的镜像上仍 exit=0 |
+
+挂载结果为空，驱动核心的自动节点维护在未启用 `CONFIG_DEVTMPFS` 的内核中不存在。节点由消费方按 sysfs 创建：测试直接枚举 `/sys/class` 得到 559 个，Droidspaces 在 `--hw-access` 模式下为容器建立其中的 32 个。
 
 ## 未实现或未验收
 
-SysV semaphore/shared memory 与 POSIX message queue 尚未实现。`devtmpfs` 使用 tmpfs 回退，硬件访问未验证；user namespace 沙箱未启用。完整 `_patchHarmony` 对等、并发容器 namespace 唯一性和任意 `setns()` 组合不在本次通过范围。
+SysV semaphore/shared memory 与 POSIX message queue 尚未实现。`devtmpfs` 文件系统类型可用，通用硬件访问未验证；user namespace 沙箱未启用。完整 `_patchHarmony` 对等、并发容器 namespace 唯一性和任意 `setns()` 组合不在本次通过范围。
 
 公开复验入口见 [开发指南](DEVELOPMENT.md)。构建测试 helper 不会自动连接设备或刷写 boot；设备行为测试必须在兼容的专用测试设备上由所有者自行执行。

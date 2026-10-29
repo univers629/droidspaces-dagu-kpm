@@ -13,7 +13,8 @@ v0.2.0 候选版本已在一台 dagu Android 15 / Linux 4.19.157 设备上完成
 当前明确限制：
 
 - SysV semaphore/shared memory 和 POSIX message queue 尚未实现。
-- synthetic user namespace 与通用 `devtmpfs`/硬件访问未实现；本项目不提供 user namespace 沙箱。
+- `devtmpfs` 文件系统类型已实现，挂载实例为空，节点由消费方按 sysfs 创建；通用硬件访问未验收。
+- synthetic user namespace 未实现；本项目不提供 user namespace 沙箱。
 - 任意 `setns()` 组合、无限并发规模和完整 `_patchHarmony` 功能对等尚未验证。
 
 为什么这些能力没有包含在快照中，以及不应据此推断什么，见[限制与未实现功能](docs/LIMITATIONS.md)。此 KPM 针对特定设备、内核和 KernelPatch loader，不代表其他设备或内核可用。

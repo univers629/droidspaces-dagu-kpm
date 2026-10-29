@@ -51,7 +51,7 @@ flowchart LR
 
 ## 当前支持边界
 
-在已验证设备上，PID/IPC `unshare()`、PID 1、部分 `clone()`/`setns()` 路径、SysV 消息队列隔离及 Droidspaces 核心容器流程通过记录的检查；后续开发候选版本完成有界的并发容器和 `setns()` 矩阵检查。以下尚未实现或未验收：SysV semaphore/shared memory、POSIX message queue、任意 `setns()` 组合、user namespace、完整 devtmpfs 硬件访问和完整上游功能对等。
+在已验证设备上，PID/IPC `unshare()`、PID 1、部分 `clone()`/`setns()` 路径、SysV 消息队列隔离及 Droidspaces 核心容器流程通过记录的检查；后续开发候选版本完成有界的并发容器和 `setns()` 矩阵检查。以下尚未实现或未验收：SysV semaphore/shared memory、POSIX message queue、任意 `setns()` 组合、user namespace、完整硬件访问和完整上游功能对等。`devtmpfs` 文件系统类型已实现，节点填充由消费方完成。
 
 这些是此开发快照的已知缺口，不应描述为已经支持或已经证明不可能实现。user namespace 和通用硬件访问还缺少安全且可验证的目标 ABI/生命周期路径；SysV semaphore/shared memory 与 POSIX mqueue 尚无实现。有限的并发与 `setns()` 检查不证明任意组合或规模均正确。详见[限制与未实现功能](LIMITATIONS.md)。
 

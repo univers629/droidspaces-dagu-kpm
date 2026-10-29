@@ -3,6 +3,7 @@
 
 #include "abi.h"
 #include "clone3.h"
+#include "devtmpfs.h"
 #include "ipc_namespace.h"
 #include "msg_core.h"
 #include "msg_syscalls.h"
@@ -156,6 +157,7 @@ static void partial_cleanup(void)
     }
     dagu_reboot_syscalls_uninstall();
     dagu_clone3_uninstall();
+    dagu_devtmpfs_uninstall();
     dagu_msg_syscalls_uninstall();
     dagu_status_bridge_uninstall();
     dagu_proc_bridge_uninstall();
@@ -230,6 +232,16 @@ static long dagu_v02_init(const char *args, const char *event, void *reserved)
     rc = dagu_clone3_install();
     if (rc)
         logkw("ds-dagu-v02: clone3 unavailable rc=%d; leaving ENOSYS\n", rc);
+    rc = 0;
+    /*
+     * The kernel has no devtmpfs type, so mounting -t devtmpfs fails with
+     * ENODEV. Registration makes the type available; failure is non-fatal
+     * because the rest of the container path does not depend on it.
+     */
+    stage = "devtmpfs filesystem type";
+    rc = dagu_devtmpfs_install();
+    if (rc)
+        logkw("ds-dagu-v02: devtmpfs type unavailable rc=%d\n", rc);
     rc = 0;
     stage = "reboot syscall isolation";
     if ((rc = dagu_reboot_syscalls_install()))
