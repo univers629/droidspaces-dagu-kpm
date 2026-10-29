@@ -7,6 +7,8 @@
 #include "ipc_namespace.h"
 #include "msg_core.h"
 #include "msg_syscalls.h"
+#include "sem_core.h"
+#include "sem_syscalls.h"
 #include "nsproxy_bridge.h"
 #include "pid_exit_guard.h"
 #include "pid_lifecycle.h"
@@ -159,6 +161,7 @@ static void partial_cleanup(void)
     dagu_clone3_uninstall();
     dagu_devtmpfs_uninstall();
     dagu_msg_syscalls_uninstall();
+    dagu_sem_syscalls_uninstall();
     dagu_status_bridge_uninstall();
     dagu_proc_bridge_uninstall();
     dagu_proc_root_dedup_uninstall();
@@ -193,6 +196,9 @@ static long dagu_v02_init(const char *args, const char *event, void *reserved)
     stage = "message core";
     if ((rc = dagu_msg_core_bind()))
         goto fail;
+    stage = "semaphore core";
+    if ((rc = dagu_sem_core_bind()))
+        goto fail;
     stage = "pid namespace";
     if ((rc = dagu_pid_namespace_bind()))
         goto fail;
@@ -221,6 +227,9 @@ static long dagu_v02_init(const char *args, const char *event, void *reserved)
         goto fail;
     stage = "message syscalls";
     if ((rc = dagu_msg_syscalls_install()))
+        goto fail;
+    stage = "semaphore syscalls";
+    if ((rc = dagu_sem_syscalls_install()))
         goto fail;
     /*
      * This kernel has no sys_clone3, so clone3.c supplies one through

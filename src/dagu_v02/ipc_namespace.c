@@ -62,6 +62,7 @@ void dagu_ipc_namespace_put(struct dagu_ipc_namespace *ns)
     if (ns && ns != &root_ipc_ns &&
         __atomic_sub_fetch(&ns->refs, 1U, __ATOMIC_ACQ_REL) == 0U) {
         dagu_msg_destroy_all(ns);
+        dagu_sem_destroy_all(ns);
         free_inum_ptr(ns->common.inum);
         kfree_ptr(ns);
     }
@@ -142,6 +143,8 @@ int dagu_ipc_namespace_bind(void)
     mutex_init_ptr(root_ipc_ns.queue_lock, "dagu_ipc_root", mutex_lock_class_key);
     root_ipc_ns.queues = 0;
     root_ipc_ns.next_queue_id = 1U;
+    root_ipc_ns.semaphores = 0;
+    root_ipc_ns.next_sem_id = 1U;
     return 0;
 }
 
@@ -166,6 +169,8 @@ struct dagu_ipc_namespace *dagu_ipc_namespace_create(void *owner_user_ns)
     ns->owner_user_ns = owner_user_ns ? owner_user_ns : init_user_ns_ptr;
     mutex_init_ptr(ns->queue_lock, "dagu_ipc_child", mutex_lock_class_key);
     ns->next_queue_id = 1U;
+    ns->semaphores = 0;
+    ns->next_sem_id = 1U;
     if (alloc_inum_ptr(&ns->common.inum)) {
         kfree_ptr(ns);
         return 0;

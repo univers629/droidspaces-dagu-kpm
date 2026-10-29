@@ -13,11 +13,14 @@ struct dagu_ipc_namespace {
     unsigned char queue_lock[128] __attribute__((aligned(8)));
     void *queues;
     unsigned int next_queue_id;
+    void *semaphores;
+    unsigned int next_sem_id;
 };
 
 void dagu_ipc_namespace_lock(struct dagu_ipc_namespace *ns);
 void dagu_ipc_namespace_unlock(struct dagu_ipc_namespace *ns);
 int dagu_ipc_namespace_admin(struct dagu_ipc_namespace *ns);
 void dagu_msg_destroy_all(struct dagu_ipc_namespace *ns);
+void dagu_sem_destroy_all(struct dagu_ipc_namespace *ns);
 
 #endif

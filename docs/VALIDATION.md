@@ -53,8 +53,23 @@
 
 挂载结果为空，驱动核心的自动节点维护在未启用 `CONFIG_DEVTMPFS` 的内核中不存在。节点由消费方按 sysfs 创建：测试直接枚举 `/sys/class` 得到 559 个，Droidspaces 在 `--hw-access` 模式下为容器建立其中的 32 个。
 
+### SysV 信号量
+
+| 范围 | 结果 | 边界 |
+| --- | --- | --- |
+| 创建与属性 | 通过 | `semget` 返回集合 id；`IPC_STAT` 回写 `key`、`mode`、`sem_nsems` 正确 |
+| 单个信号量操作 | 通过 | `SETVAL`、`GETVAL`、`GETPID` 按预期读写 |
+| P/V 操作 | 通过 | `semop` 负值递减、正值递增，结果与余额一致 |
+| 余额不足 | 通过 | 递减超过当前值返回 `EAGAIN`，值保持不变 |
+| 多信号量原子性 | 通过 | 一项失败时整个操作回滚，先前项的写入不保留 |
+| 批量赋值 | 通过 | `SETALL`、`GETALL` 按 `sem_nsems` 逐一读写 |
+| 删除 | 通过 | `IPC_RMID` 后同一 id 的访问返回错误 |
+| 稳定性 | 通过 | 连续 20 轮完整用例无失败，同轮次内 PID/IPC namespace 与 `clone3` 检查保持退出码 0 |
+
+信号量经 `el0_svc_common` 拦截实现：该内核的四个信号量 syscall 对应 8 字节 weak stub，逐个改写表项无法在其上完成 inline hook。调用参数在 before 阶段存入 transit 局部量，after 阶段覆写 `regs->regs[0]`。
+
 ## 未实现或未验收
 
-SysV semaphore/shared memory 与 POSIX message queue 尚未实现。`devtmpfs` 文件系统类型可用，通用硬件访问未验证；user namespace 沙箱未启用。完整 `_patchHarmony` 对等、并发容器 namespace 唯一性和任意 `setns()` 组合不在本次通过范围。
+SysV shared memory 与 POSIX message queue 尚未实现。`devtmpfs` 文件系统类型可用，通用硬件访问未验证；user namespace 沙箱未启用。完整 `_patchHarmony` 对等、并发容器 namespace 唯一性和任意 `setns()` 组合不在本次通过范围。
 
 公开复验入口见 [开发指南](DEVELOPMENT.md)。构建测试 helper 不会自动连接设备或刷写 boot；设备行为测试必须在兼容的专用测试设备上由所有者自行执行。

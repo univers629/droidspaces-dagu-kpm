@@ -21,6 +21,8 @@ SOURCES = (
     "ipc_namespace.c",
     "nsproxy_bridge.c",
     "msg_core.c",
+    "sem_core.c",
+    "sem_syscalls.c",
     "usercopy.c",
     "msg_syscalls.c",
     "clone3.c",

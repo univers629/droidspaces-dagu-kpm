@@ -6,10 +6,11 @@
 
 - **`clone3`：**目标内核的 `sys_call_table` 只有 435 项，`__NR_syscalls=435`，`scno >= 435` 直接走 `do_ni_syscall`，按 syscall 表项 hook 写入的是表外 rodata，回调不触发。实现改为 inline hook `el0_svc_common`，在 after 阶段调用六参数 `_do_fork` 后覆写 `regs->regs[0]`。fork、CLONE_THREAD 与参数校验路径已在设备验证。
 - **`devtmpfs` 文件系统类型：**KPM 复制 `shmem_fs_type` 并改名注册，`mount -t devtmpfs` 可用。驱动核心的自动节点维护在未启用 `CONFIG_DEVTMPFS` 的内核中不存在，挂载实例为空，节点由消费方按 sysfs 创建。目标镜像上该结构实例为 0x68 字节，拷贝以此为界。通用硬件访问未验收。
+- **SysV 信号量：**四个 syscall 在该内核上返回 ENOSYS，实现经 `el0_svc_common` 拦截后由 KPM 提供，集合按 fake IPC namespace 隔离。`semget`、`semop`、`semtimedop` 与 `semctl` 的创建、属性、P/V、原子多操作和删除路径已在设备验证。
 
 ## 尚未实现
 
-- **SysV semaphore/shared memory 与 POSIX message queue：**没有实现对应的 namespace 对象、隔离和生命周期路径，也没有设备验收；不要将 SysV message queue 的支持外推到其他 IPC 类型。
+- **SysV shared memory 与 POSIX message queue：**没有实现对应的 namespace 对象、隔离和生命周期路径，也没有设备验收；不要将 SysV message queue 与 semaphore 的支持外推到其他 IPC 类型。
 - **通用硬件访问：**`devtmpfs` 类型可用后，容器节点由消费方创建；跨设备的通用硬件访问未验收。
 - **User namespace：**目标内核没有启用原生 user namespace。KPM 合成实现所需的 cred/user namespace ABI、权限与 capability 规则、native/compat 路径和对象引用/卸载生命周期尚未全部证明安全，因此此版本不提供 user namespace 或 Bubblewrap 沙箱。
 
