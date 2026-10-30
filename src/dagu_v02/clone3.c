@@ -98,9 +98,17 @@ static unsigned int diag_entry_seen;
 static unsigned int diag_alive_logged;
 static unsigned int diag_clone3_seen;
 
-/* Rejected flags, matching upstream clone3_args_valid(). */
+/*
+ * Flags whose semantics the six-argument _do_fork form cannot provide.
+ * These are reported as ENOSYS rather than EINVAL: the glibc clone3 wrapper
+ * falls back to clone() only when the syscall reports ENOSYS, so EINVAL
+ * propagates to the caller as a hard failure. Every pthread_create() and
+ * posix_spawn() that probes clone3 with CLONE_PIDFD then fails instead of
+ * using the legacy path.
+ */
 #define DAGU_CLONE_INTO_CGROUP	0x200000000ULL
 #define DAGU_CLONE_PIDFD	0x00001000UL
+#define DAGU_CLONE_THREAD	0x00010000UL
 
 /* Argument validation, matching upstream clone3_args_valid(). */
 static int dagu_clone3_args_valid(const struct dagu_user_clone_args *u)
@@ -116,9 +124,6 @@ static int dagu_clone3_args_valid(const struct dagu_user_clone_args *u)
 		return 0;
 	/* set_tid requires a matching size. */
 	if (!u->set_tid && u->set_tid_size)
-		return 0;
-	/* CLONE_INTO_CGROUP is unsupported here. */
-	if (u->flags & DAGU_CLONE_INTO_CGROUP)
 		return 0;
 	return 1;
 }
@@ -161,13 +166,31 @@ long dagu_clone3(void *uargs, unsigned long size)
 
 	/*
 	 * The six-argument form has no pidfd, set_tid or cgroup field.
-	 * CLONE_PIDFD is already rejected by the validator above.
 	 */
-	if (u.flags & DAGU_CLONE_PIDFD)
-		return -22;
+	if (u.flags & (DAGU_CLONE_PIDFD | DAGU_CLONE_INTO_CGROUP))
+		return -38;	/* ENOSYS: let the caller fall back to clone() */
 
+	/*
+	 * Thread creation is left to the kernel's clone(). A clone3 thread
+	 * resumes at the caller's post-syscall register state with only x0
+	 * cleared and sp replaced, while glibc hands the thread entry and its
+	 * argument over through that state. _do_fork cannot reproduce the
+	 * contract, so the thread starts without them and faults. clone()
+	 * carries the same arguments in its own ABI and is implemented by the
+	 * kernel itself.
+	 */
+	if (u.flags & DAGU_CLONE_THREAD)
+		return -38;	/* ENOSYS: let the caller use clone() */
+
+	/*
+	 * clone3 reports the stack as a base address plus a size, while the
+	 * six-argument _do_fork form takes the initial stack pointer itself.
+	 * A thread starts only when the pointer is the top of its stack;
+	 * passing the base leaves the first frame inside the guard page and
+	 * the thread faults before it runs.
+	 */
 	return ((dagu_do_fork_fn)do_fork_addr)(flags,
-					       (unsigned long)u.stack,
+					       (unsigned long)(u.stack + u.stack_size),
 					       (unsigned long)u.stack_size,
 					       (int *)(unsigned long)u.parent_tid,
 					       (int *)(unsigned long)u.child_tid,
