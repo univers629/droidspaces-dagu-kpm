@@ -63,6 +63,7 @@ void dagu_ipc_namespace_put(struct dagu_ipc_namespace *ns)
         __atomic_sub_fetch(&ns->refs, 1U, __ATOMIC_ACQ_REL) == 0U) {
         dagu_msg_destroy_all(ns);
         dagu_sem_destroy_all(ns);
+        dagu_mq_destroy_all(ns);
         free_inum_ptr(ns->common.inum);
         kfree_ptr(ns);
     }

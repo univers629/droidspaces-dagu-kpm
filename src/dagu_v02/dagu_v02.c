@@ -5,6 +5,9 @@
 #include "clone3.h"
 #include "devtmpfs.h"
 #include "ipc_namespace.h"
+#include "mqueue.h"
+#include "mqueue_core.h"
+#include "mqueue_syscalls.h"
 #include "msg_core.h"
 #include "msg_syscalls.h"
 #include "sem_core.h"
@@ -161,9 +164,11 @@ static void partial_cleanup(void)
     dagu_reboot_syscalls_uninstall();
     dagu_clone3_uninstall();
     dagu_devtmpfs_uninstall();
+    dagu_mqueue_uninstall();
     dagu_xt_addrtype_uninstall();
     dagu_msg_syscalls_uninstall();
     dagu_sem_syscalls_uninstall();
+    dagu_mq_syscalls_uninstall();
     dagu_status_bridge_uninstall();
     dagu_proc_bridge_uninstall();
     dagu_proc_root_dedup_uninstall();
@@ -201,6 +206,9 @@ static long dagu_v02_init(const char *args, const char *event, void *reserved)
     stage = "semaphore core";
     if ((rc = dagu_sem_core_bind()))
         goto fail;
+    stage = "mqueue core";
+    if ((rc = dagu_mq_core_bind()))
+        goto fail;
     stage = "pid namespace";
     if ((rc = dagu_pid_namespace_bind()))
         goto fail;
@@ -233,6 +241,9 @@ static long dagu_v02_init(const char *args, const char *event, void *reserved)
     stage = "semaphore syscalls";
     if ((rc = dagu_sem_syscalls_install()))
         goto fail;
+    stage = "mqueue syscalls";
+    if ((rc = dagu_mq_syscalls_install()))
+        goto fail;
     /*
      * This kernel has no sys_clone3, so clone3.c supplies one through
      * _do_fork. Failure is non-fatal: without _do_fork the syscall keeps
@@ -259,6 +270,17 @@ static long dagu_v02_init(const char *args, const char *event, void *reserved)
      * dockerd adds to its NAT chain and the daemon exits. Registration is
      * non-fatal: the match is only needed by callers that use it.
      */
+    /*
+     * The kernel has no mqueue type, so mounting -t mqueue fails with ENODEV
+     * and a container runtime cannot set up /dev/mqueue. Registration is
+     * non-fatal for the same reason as devtmpfs: the type is only needed by
+     * callers that mount it.
+     */
+    stage = "mqueue filesystem type";
+    rc = dagu_mqueue_install();
+    if (rc)
+        logkw("ds-dagu-v02: mqueue type unavailable rc=%d\n", rc);
+    rc = 0;
     stage = "addrtype match";
     rc = dagu_xt_addrtype_install();
     if (rc)

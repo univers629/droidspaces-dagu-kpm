@@ -73,3 +73,18 @@
 SysV shared memory 与 POSIX message queue 尚未实现。`devtmpfs` 文件系统类型可用，通用硬件访问未验证；user namespace 沙箱未启用。完整 `_patchHarmony` 对等、并发容器 namespace 唯一性和任意 `setns()` 组合不在本次通过范围。
 
 公开复验入口见 [开发指南](DEVELOPMENT.md)。构建测试 helper 不会自动连接设备或刷写 boot；设备行为测试必须在兼容的专用测试设备上由所有者自行执行。
+
+## 2026-10-31 增量验证（POSIX 消息队列）
+
+测试环境为 Xiaomi dagu（Android 14，Linux `4.19.157-perf-gb57830672689`），
+boot 镜像含 selinux KPM、本 KPM 与 IPv6 NAT KPM（KPImg 0.13.14）。
+
+| 范围 | 结果 | 边界 |
+| --- | --- | --- |
+| `mq_open` / `mq_unlink` | 通过 | 创建、`O_EXCL` 冲突返回 EEXIST、缺名返回 ENOENT、重复 unlink 返回 ENOENT |
+| `mq_timedsend` / `mq_timedreceive` | 通过 | 消息按优先级降序出队；`mq_getsetattr` 回读 `mq_maxmsg`/`mq_msgsize`；队列满时非阻塞返回 EAGAIN；空队列绝对超时返回 ETIMEDOUT；缓冲区小于 `mq_msgsize` 返回 EMSGSIZE |
+| 描述符语义 | 通过 | 描述符为 anon-inode 文件，`close()` 释放打开计数；`O_NONBLOCK` 按描述符生效 |
+| `mq_notify` | 未实现 | 返回 ENOSYS |
+
+测试在容器内以 Python `ctypes` 直接调用系统调用完成（180–185），未覆盖
+多线程阻塞唤醒与 signal 通知路径。
