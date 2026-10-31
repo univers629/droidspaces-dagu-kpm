@@ -6,6 +6,7 @@ int dagu_userns_bind(void);
 int dagu_userns_install(void);
 void dagu_userns_uninstall(void);
 unsigned int dagu_userns_live(void);
+void dagu_userns_hold(void *ns);
 int dagu_userns_is_record(void *ns);
 
 int dagu_userns_proc_bind(void);

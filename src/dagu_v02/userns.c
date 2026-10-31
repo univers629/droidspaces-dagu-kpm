@@ -19,7 +19,7 @@
 #include <hook.h>
 #include <kallsyms.h>
 
-#define DAGU_USERNS_MAX 32U
+#define DAGU_USERNS_MAX 128U
 
 /* struct user_namespace, read from this kernel's debug information */
 #define UNS_COUNT       0x0d8U
@@ -83,6 +83,7 @@ struct dagu_userns {
     void *parent;
     unsigned int level;
     unsigned int refs;
+    unsigned int holders;
     unsigned int live;
 };
 
@@ -110,6 +111,7 @@ static void *copy_mnt_ns_addr;
 static void *sget_userns_addr;
 static void *sget_addr;
 static void *mount_nodev_addr;
+static void *put_cred_addr;
 typedef void *(*sget_userns_fn)(void *, void *, void *, int, void *, void *);
 static sget_userns_fn sget_userns_ptr;
 
@@ -301,15 +303,30 @@ static struct dagu_userns *userns_create(void *parent)
     return u;
 }
 
+/*
+ * The credential is not the only reference: a mount or pid namespace keeps
+ * the namespace it was created in, and the kernel releases those through
+ * get_user_ns()/put_user_ns(), which this kernel compiles to nothing. Every
+ * such holder is counted here instead, so a slot is only reusable once both
+ * the credential and the namespaces built from it are gone.
+ */
+void dagu_userns_hold(void *ns)
+{
+    struct dagu_userns *u = slot_of_record(ns);
+
+    if (u)
+        __atomic_add_fetch(&u->holders, 1U, __ATOMIC_RELAXED);
+}
+
 static void userns_put(struct dagu_userns *u)
 {
     if (!u)
         return;
-    if (u->refs > 1) {
-        --u->refs;
+    if (__atomic_load_n(&u->refs, __ATOMIC_RELAXED) > 0)
+        __atomic_sub_fetch(&u->refs, 1U, __ATOMIC_RELAXED);
+    if (__atomic_load_n(&u->refs, __ATOMIC_ACQUIRE) ||
+        __atomic_load_n(&u->holders, __ATOMIC_ACQUIRE))
         return;
-    }
-    u->refs = 0;
     u->parent = 0;
     u->level = 0;
     if (live_count)
@@ -488,8 +505,10 @@ static void nsproxy_before(hook_fargs4_t *args, void *udata)
     if (flags & DAGU_CLONE_NEWPID) {
         void *pid_ns = dagu_load_ptr(nsp, NSPROXY_PID_CHILDREN);
 
-        if (pid_ns)
+        if (pid_ns) {
             dagu_store_ptr(pid_ns, PIDNS_USER_NS, record_of(u));
+            dagu_userns_hold(record_of(u));
+        }
     }
     *new_nsp = nsp;
     args->ret = 0;
@@ -532,6 +551,22 @@ static void copy_mnt_ns_after(hook_fargs4_t *args, void *udata)
     if (!u)
         return;
     dagu_store_ptr(mnt_ns, MNTNS_USER_NS, record_of(u));
+    dagu_userns_hold(record_of(u));
+}
+
+/*
+ * __put_cred() is where a credential stops being used; the namespace it named
+ * is released with it. The kernel would call put_user_ns() here, which is a
+ * stub in this build, so the reference is dropped from the release path.
+ */
+static void put_cred_before(hook_fargs1_t *args, void *udata)
+{
+    void *cred = (void *)args->arg0;
+    (void)udata;
+
+    if (!cred)
+        return;
+    userns_put(slot_of_record(dagu_load_ptr(cred, CRED_USER_NS)));
 }
 
 /*
@@ -658,6 +693,7 @@ int dagu_userns_bind(void)
     copy_mnt_ns_addr = (void *)kallsyms_lookup_name("copy_mnt_ns");
     sget_userns_addr = (void *)kallsyms_lookup_name("sget_userns");
     mount_nodev_addr = (void *)kallsyms_lookup_name("mount_nodev");
+    put_cred_addr = (void *)kallsyms_lookup_name("__put_cred");
     sget_addr = (void *)kallsyms_lookup_name("sget");
     sget_userns_ptr = (sget_userns_fn)kallsyms_lookup_name("sget_userns");
 
@@ -725,6 +761,11 @@ int dagu_userns_install(void)
         if (rc == HOOK_NO_ERR)
             hook_bits |= 1024U;
     }
+    if (put_cred_addr) {
+        rc = hook_wrap1(put_cred_addr, put_cred_before, 0, 0);
+        if (rc == HOOK_NO_ERR)
+            hook_bits |= 2048U;
+    }
     if ((hook_bits & 31U) != 31U) {
         logkw("ds-dagu-userns: partial hook set 0x%x\n", hook_bits);
     }
@@ -740,6 +781,8 @@ void dagu_userns_uninstall(void)
     dagu_userns_ns_uninstall();
     dagu_userns_proc_uninstall();
     __atomic_store_n(&installed, 0U, __ATOMIC_RELEASE);
+    if (hook_bits & 2048U)
+        hook_unwrap(put_cred_addr, put_cred_before, 0);
     if (hook_bits & 32U)
         hook_unwrap(sget_userns_addr, 0, sget_after);
     if (hook_bits & 16U)

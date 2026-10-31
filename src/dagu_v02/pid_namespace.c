@@ -152,6 +152,8 @@ void *dagu_pid_namespace_create(void *parent, void *user_ns)
     dagu_store_ptr(ns, DAGU_PIDNS_PARENT, parent);
     dagu_store_ptr(ns, DAGU_PIDNS_OWNER_USER_NS,
                    user_ns ? user_ns : init_user_ns_ptr);
+    if (user_ns)
+        dagu_userns_hold(user_ns);
     dagu_store_ptr(ns, DAGU_PIDNS_CACHE, cache_for_level(level));
     if (!dagu_load_ptr(ns, DAGU_PIDNS_CACHE)) {
         kfree_ptr(ns);
