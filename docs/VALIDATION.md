@@ -123,3 +123,19 @@ boot 镜像含 selinux KPM 与本 KPM（KPImg 0.13.14）。
 | 容器内 `unshare -U -m -p -f --mount-proc` | 通过 | `allow_sandboxing=1` 后容器内可用，新 PID namespace 内 `/proc` 可挂载、可写 |
 
 测试为宿主侧静态程序（`unshare`、`mount`、`open/write/read`、`umount`），容器侧为 `kdeanland` 内的 `unshare` 命令；未覆盖多线程形态。
+
+## 2026-10-31 增量验证（macvlan link type）
+
+测试环境同上一节。macvlan 由 `src/dagu_v02/macvlan_ko/` 编成的模块提供，
+通过 `/data/adb/service.d/99-dagu-macvlan.sh` 在开机时加载。
+
+| 范围 | 结果 | 边界 |
+| --- | --- | --- |
+| 模块加载与卸载 | 通过 | `insmod`、`rmmod`、重新加载各两次，无异常 |
+| 创建设备 | 通过 | `ip link add link <veth> name mv0 address 02:00:00:00:00:01 type macvlan mode bridge` 成功，MAC 按请求设置 |
+| 删除设备 | 通过 | `ip link del mv0` 后设备消失，下级设备的 `rx_handler` 随之释放 |
+| 收发 | 通过 | macvlan 与 veth 对端各配 `10.9.9.0/24` 地址后互 ping，2/2 回包，无丢包 |
+| `droidspaces check` | 通过 | Macvlan 项与 Veth、Sandboxing 项同时通过 |
+| 开机自动加载 | 通过 | 重启后 `/proc/modules` 中有 `dagu_macvlan`，`droidspaces check` 直接通过 |
+
+测试为设备上的 `ip` 与 `ping`；未覆盖并发创建删除、源地址过滤模式与 `macvtap`。

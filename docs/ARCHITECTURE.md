@@ -38,6 +38,7 @@ flowchart LR
 | `userns.c` | User namespace：命名空间记录、凭据安装、挂载路径与 superblock 归属修正 |
 | `userns_proc.c` | User namespace：在 `/proc/<pid>` 下补回 `uid_map`、`gid_map`、`setgroups` |
 | `userns_ns.c` | User namespace：在 `/proc/<pid>/ns` 下补回 `user` 条目 |
+| `macvlan_ko/dagu_macvlan.c` | 独立编译的 macvlan link type 模块：注册 `rtnl_link_ops`，下级设备挂 `rx_handler`，按目的地址分发 |
 | `mqueue_core.c`、`mqueue_syscalls.c` | POSIX 消息队列：队列对象挂在 fake IPC namespace 上，`mq_*` 系统调用经 `el0_svc_common` 拦截 |
 | `proc_bridge.c`、`status_bridge.c`、`proc_mount_refs.c`、`proc_root_dedup.c` | namespace link、`/proc` 状态与挂载引用表现 |
 | `pid_exit_guard.c` | PID 1 退出相关保护逻辑 |
@@ -57,7 +58,7 @@ flowchart LR
 
 ## 当前支持边界
 
-在已验证设备上，PID/IPC `unshare()`、PID 1、部分 `clone()`/`setns()` 路径、SysV 消息队列隔离及 Droidspaces 核心容器流程通过记录的检查；后续开发候选版本完成有界的并发容器和 `setns()` 矩阵检查。以下尚未实现或未验收：SysV shared memory、POSIX message queue、任意 `setns()` 组合、user namespace、完整硬件访问和完整上游功能对等。`devtmpfs` 文件系统类型已实现，节点填充由消费方完成。
+在已验证设备上，PID/IPC `unshare()`、PID 1、部分 `clone()`/`setns()` 路径、SysV 消息队列隔离及 Droidspaces 核心容器流程通过记录的检查；后续开发候选版本完成有界的并发容器和 `setns()` 矩阵检查。以下尚未实现或未验收：SysV shared memory、任意 `setns()` 组合、非恒等 id 映射、完整硬件访问和完整上游功能对等；macvlan 由独立模块提供，未实现在本仓库的 KPM 内。`devtmpfs` 文件系统类型已实现，节点填充由消费方完成。
 
 这些是此开发快照的已知缺口，不应描述为已经支持或已经证明不可能实现。user namespace 和通用硬件访问还缺少安全且可验证的目标 ABI/生命周期路径；SysV shared memory 尚无实现，POSIX mqueue 的 `mq_notify` 未实现。有限的并发与 `setns()` 检查不证明任意组合或规模均正确。详见[限制与未实现功能](LIMITATIONS.md)。
 
