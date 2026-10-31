@@ -38,7 +38,7 @@ flowchart LR
 | `userns.c` | User namespace：命名空间记录、凭据安装、挂载路径与 superblock 归属修正 |
 | `userns_proc.c` | User namespace：在 `/proc/<pid>` 下补回 `uid_map`、`gid_map`、`setgroups` |
 | `userns_ns.c` | User namespace：在 `/proc/<pid>/ns` 下补回 `user` 条目 |
-| `macvlan_ko/dagu_macvlan.c` | 独立编译的 macvlan link type 模块：注册 `rtnl_link_ops`，下级设备挂 `rx_handler`，按目的地址分发 |
+| `macvlan_ko/dagu_macvlan.c` | 独立编译的 macvlan link type 模块：注册 `rtnl_link_ops` 与 netdevice 通知，下级设备挂 `rx_handler`，按目的地址与模式分发并统计收发 |
 | `mqueue_core.c`、`mqueue_syscalls.c` | POSIX 消息队列：队列对象挂在 fake IPC namespace 上，`mq_*` 系统调用经 `el0_svc_common` 拦截 |
 | `proc_bridge.c`、`status_bridge.c`、`proc_mount_refs.c`、`proc_root_dedup.c` | namespace link、`/proc` 状态与挂载引用表现 |
 | `pid_exit_guard.c` | PID 1 退出相关保护逻辑 |

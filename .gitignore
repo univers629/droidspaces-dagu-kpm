@@ -38,6 +38,13 @@
 *.xz
 *.bin
 
+# Kernel module build output next to the sources
+*.mod.c
+*.cmd
+modules.order
+Module.symvers
+.tmp_versions/
+
 # Unexpected temporary files found in the local workspace
 /System.Management.Automation.Internal.Host.InternalHost
 /temp.gz

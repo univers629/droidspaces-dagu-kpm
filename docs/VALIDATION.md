@@ -136,6 +136,16 @@ boot 镜像含 selinux KPM 与本 KPM（KPImg 0.13.14）。
 | 删除设备 | 通过 | `ip link del mv0` 后设备消失，下级设备的 `rx_handler` 随之释放 |
 | 收发 | 通过 | macvlan 与 veth 对端各配 `10.9.9.0/24` 地址后互 ping，2/2 回包，无丢包 |
 | `droidspaces check` | 通过 | Macvlan 项与 Veth、Sandboxing 项同时通过 |
+| 模式参数 | 通过 | `bridge`、`private`、`vepa`、`passthru` 均可创建；`passthru` 独占下级设备，第二个同类请求返回 `EBUSY` |
+| 源地址过滤 | 部分 | `private` 与 `vepa` 在接收路径上丢弃源地址属于兄弟设备的帧；观测该行为需要下级设备回环交换，本次只验证了模式可创建与正常收发不受影响 |
+| 收发统计 | 通过 | `ip -s link show` 的 RX/TX 计数随跨 netns 的 ARP 与 ICMP 流量增长 |
+| 命名空间内置 | 通过 | 容器以 `--net=macvlan --macvlan-parent=wlan0` 启动后，`eth0@if10` 由本模块在容器 netns 内建出，MAC 为派生值 |
+| 下级设备消失 | 通过 | `ip link del <lower>` 后其上的 macvlan 一并消失，系统不重启 |
+| 并发创建删除 | 通过 | 同一下级设备上并行创建 8 个 macvlan 再并行删除，全部成功 |
 | 开机自动加载 | 通过 | 重启后 `/proc/modules` 中有 `dagu_macvlan`，`droidspaces check` 直接通过 |
 
-测试为设备上的 `ip` 与 `ping`；未覆盖并发创建删除、源地址过滤模式与 `macvtap`。
+测试为设备上的 `ip`、`ping` 与 `droidspaces check`；未覆盖 `macvtap` 与 `source` 模式。
+
+无线接口作下级设备时只验证到发送方向：`wlan0` 的站点模式驱动不会把目的地址为其它
+MAC 的帧交给网络栈，容器 `eth0` 的 DHCP 请求能发出而回应收不到，接收计数保持为 0。
+这是无线驱动的限制，不是模块的分发路径；以太网、`veth` 与网卡直通场景按上表验证。
