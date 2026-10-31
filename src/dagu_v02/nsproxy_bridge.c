@@ -2,6 +2,7 @@
 /* PID/IPC namespace proxy lifecycle, including clone inheritance. */
 
 #include "abi.h"
+#include "userns.h"
 #include "ipc_namespace.h"
 #include "nsproxy_bridge.h"
 #include "ns_types.h"
@@ -100,7 +101,8 @@ static void create_before(hook_fargs4_t *args, void *unused)
             args->skip_origin = 1;
             return;
         }
-        if (!user_ns || user_ns != init_user_ns_ptr ||
+        if (!user_ns ||
+            (user_ns != init_user_ns_ptr && !dagu_userns_is_record(user_ns)) ||
             !ns_capable_ptr(user_ns, DAGU_CAP_SYS_ADMIN)) {
             args->ret = (unsigned long)-DAGU_EPERM;
             args->skip_origin = 1;
@@ -233,6 +235,8 @@ static void clone_before(hook_fargs5_t *args, void *unused)
     void *restore_proxy = 0;
     void *child_proxy = 0;
     unsigned long namespace_flags = DAGU_CLONE_NEWIPC | DAGU_CLONE_NEWPID;
+    void *owner;
+    void *cred;
     int want_pid = (flags & DAGU_CLONE_NEWPID) != 0;
     int want_ipc = (flags & DAGU_CLONE_NEWIPC) != 0;
     (void)unused;
@@ -254,7 +258,15 @@ static void clone_before(hook_fargs5_t *args, void *unused)
         clone_fail(args, DAGU_EOPNOTSUPP);
         return;
     }
-    if (!init_user_ns_ptr || !ns_capable_ptr(init_user_ns_ptr, DAGU_CAP_SYS_ADMIN)) {
+    owner = init_user_ns_ptr;
+    cred = dagu_load_ptr(current, DAGU_TASK_CRED);
+    if (cred) {
+        void *cred_ns = dagu_load_ptr(cred, DAGU_CRED_USER_NS);
+
+        if (dagu_userns_is_record(cred_ns))
+            owner = cred_ns;
+    }
+    if (!owner || !ns_capable_ptr(owner, DAGU_CAP_SYS_ADMIN)) {
         clone_fail(args, DAGU_EPERM);
         return;
     }
@@ -270,14 +282,14 @@ static void clone_before(hook_fargs5_t *args, void *unused)
             clone_fail(args, DAGU_EINVAL);
             return;
         }
-        fake_pid = dagu_pid_namespace_create(parent_pid, init_user_ns_ptr);
+        fake_pid = dagu_pid_namespace_create(parent_pid, owner);
         if (!fake_pid) {
             clone_fail(args, DAGU_ENOMEM);
             return;
         }
     }
     if (want_ipc) {
-        fake_ipc = dagu_ipc_namespace_create(init_user_ns_ptr);
+        fake_ipc = dagu_ipc_namespace_create(owner);
         if (!fake_ipc) {
             dagu_pid_namespace_put(fake_pid);
             clone_fail(args, DAGU_ENOMEM);

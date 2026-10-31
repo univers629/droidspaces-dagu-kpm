@@ -2,6 +2,7 @@
 /* Draft PID namespace storage for the exact current Image field offsets. */
 
 #include "abi.h"
+#include "userns.h"
 #include "pid_namespace.h"
 
 #include <asm/current.h>
@@ -133,7 +134,8 @@ void *dagu_pid_namespace_create(void *parent, void *user_ns)
     unsigned int level;
     if (!parent || !kmalloc_ptr || !alloc_inum_ptr)
         return 0;
-    if (user_ns && user_ns != init_user_ns_ptr)
+    if (user_ns && user_ns != init_user_ns_ptr &&
+        !dagu_userns_is_record(user_ns))
         return 0;
     level = dagu_load_u32(parent, DAGU_PIDNS_LEVEL) + 1U;
     if (level > DAGU_PIDNS_MAX_LEVEL)

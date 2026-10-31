@@ -103,3 +103,23 @@ boot 镜像只含 selinux KPM 与合并了 IPv6 NAT 的本 KPM（KPImg 0.13.14�
 | 卸载 | 不适用 | KPM 的 unload 已被现有守卫拒绝 |
 
 容器侧配置（`IPv6AcceptRA=no`、静态地址单元、`--dns`）不属于 KPM，记录在工作区的 `tools/container-net/`。
+
+## 2026-10-31 增量验证（User namespace 核心）
+
+测试环境为 Xiaomi dagu（Android 14，Linux `4.19.157-perf-gb57830672689`），
+boot 镜像含 selinux KPM 与本 KPM（KPImg 0.13.14）。
+
+| 范围 | 结果 | 边界 |
+| --- | --- | --- |
+| `unshare(CLONE_NEWUSER)` | 通过 | 凭据换成新建命名空间，`cap_effective` 全满 |
+| `unshare(CLONE_NEWNS)` | 通过 | 新 mount namespace 的 owner 为该命名空间 |
+| `mount -t tmpfs` | 通过 | 挂载、写文件、读回、`umount` 全部成功 |
+| `mq_*` 与 IPv6 NAT | 通过 | 同一镜像内未回归；`ip6tables -t nat -L` 可用 |
+| `uid_map` / `gid_map` / `setgroups` | 通过 | 新建命名空间读出恒等映射与 `deny`，初始命名空间读出 `allow`；恒等写入成功，非恒等写入返回 EPERM |
+| `/proc/<pid>/ns/user` | 未实现 | 内核没有该 nsfs 条目，也没有对应的 operations |
+| `unshare(CLONE_NEWPID)` | 通过 | 先 `unshare(CLONE_NEWUSER)`，再创建 PID namespace；`fork` 后子进程 `getpid()` 为 1，`mount -t proc` 成功 |
+| `unshare(CLONE_NEWUSER \| CLONE_NEWPID \| CLONE_NEWNS)` | 通过 | 一次调用同时建立三类命名空间，`mount` 与 `umount` 正常 |
+| `clone(CLONE_NEWUSER)` | 不支持 | 跨进程安装凭据的路径未实现，返回 `EOPNOTSUPP` |
+| 容器内 `unshare -U -m -p -f --mount-proc` | 通过 | `allow_sandboxing=1` 后容器内可用，新 PID namespace 内 `/proc` 可挂载、可写 |
+
+测试为宿主侧静态程序（`unshare`、`mount`、`open/write/read`、`umount`），容器侧为 `kdeanland` 内的 `unshare` 命令；未覆盖多线程形态。
