@@ -43,6 +43,7 @@
 
 #define NS_COMMON_OPS   0x08U
 #define NS_COMMON_INUM  0x10U
+#define DAGU_USERNS_INUM_BASE 4026531900U
 
 /* struct cred */
 #define CRED_SECUREBITS    0x24U
@@ -236,8 +237,13 @@ static void fill_record(struct dagu_userns *u, void *parent)
     dagu_store_u32(u->record, UNS_LEVEL, level);
     dagu_store_u32(u->record, UNS_OWNER, 0U);
     dagu_store_u32(u->record, UNS_GROUP, 0U);
-    dagu_store_ptr(u->record, UNS_NS + NS_COMMON_OPS, init_ns_ops_ptr);
-    dagu_store_u32(u->record, UNS_NS + NS_COMMON_INUM, 0U);
+    /*
+     * The namespace file entries print the number behind /proc/<pid>/ns, and
+     * the nsfs inode behind the link keeps it, so each record gets its own.
+     */
+    dagu_store_ptr(u->record, UNS_NS + NS_COMMON_OPS, dagu_userns_ns_ops());
+    dagu_store_u32(u->record, UNS_NS + NS_COMMON_INUM,
+                   DAGU_USERNS_INUM_BASE + (unsigned int)(u - pool));
     dagu_store_ptr(u->record, UNS_FLAGS, 0);
     /*
      * A namespace without ucounts cannot create mount namespaces, and a zero
@@ -628,9 +634,9 @@ static int check_layout(void)
     if (dagu_load_ptr(init_user_ns_ptr, UNS_PARENT) != 0)
         return DAGU_EINVAL;
     /*
-     * The operations pointer of the initial namespace is not needed: this
-     * kernel exposes no nsfs entry for user namespaces, so no inode is ever
-     * created from the record. Kept when present, left null otherwise.
+     * The initial namespace is created by the kernel without the option, so
+     * its ns_common carries no operations pointer; userns_ns.c installs one
+     * before anything can look the entry up.
      */
     init_ns_ops_ptr = dagu_load_ptr(init_user_ns_ptr, UNS_NS + NS_COMMON_OPS);
     return 0;
@@ -638,6 +644,8 @@ static int check_layout(void)
 
 int dagu_userns_bind(void)
 {
+    hook_err_t rc;
+
     init_user_ns_ptr = (void *)kallsyms_lookup_name("init_user_ns");
     prepare_creds_ptr = (prepare_creds_fn)kallsyms_lookup_name("prepare_creds");
     commit_creds_ptr = (commit_creds_fn)kallsyms_lookup_name("commit_creds");
@@ -664,7 +672,10 @@ int dagu_userns_bind(void)
         return -2;
     }
     __atomic_store_n(&layout_ok, 1U, __ATOMIC_RELEASE);
-    return dagu_userns_proc_bind();
+    rc = dagu_userns_proc_bind();
+    if (rc)
+        return rc;
+    return dagu_userns_ns_bind();
 }
 
 int dagu_userns_install(void)
@@ -719,12 +730,14 @@ int dagu_userns_install(void)
     }
     __atomic_store_n(&installed, 1U, __ATOMIC_RELEASE);
     dagu_userns_proc_install();
+    dagu_userns_ns_install();
     logki("ds-dagu-userns: installed, hooks=0x%x\n", hook_bits);
     return 0;
 }
 
 void dagu_userns_uninstall(void)
 {
+    dagu_userns_ns_uninstall();
     dagu_userns_proc_uninstall();
     __atomic_store_n(&installed, 0U, __ATOMIC_RELEASE);
     if (hook_bits & 32U)

@@ -116,7 +116,7 @@ boot 镜像含 selinux KPM 与本 KPM（KPImg 0.13.14）。
 | `mount -t tmpfs` | 通过 | 挂载、写文件、读回、`umount` 全部成功 |
 | `mq_*` 与 IPv6 NAT | 通过 | 同一镜像内未回归；`ip6tables -t nat -L` 可用 |
 | `uid_map` / `gid_map` / `setgroups` | 通过 | 新建命名空间读出恒等映射与 `deny`，初始命名空间读出 `allow`；恒等写入成功，非恒等写入返回 EPERM |
-| `/proc/<pid>/ns/user` | 未实现 | 内核没有该 nsfs 条目，也没有对应的 operations |
+| `/proc/<pid>/ns/user` | 通过 | 初始命名空间读出 `user:[4026531837]`，新建命名空间读出独立 inode；`droidspaces check` 的 Sandboxing 项转为通过 |
 | `unshare(CLONE_NEWPID)` | 通过 | 先 `unshare(CLONE_NEWUSER)`，再创建 PID namespace；`fork` 后子进程 `getpid()` 为 1，`mount -t proc` 成功 |
 | `unshare(CLONE_NEWUSER \| CLONE_NEWPID \| CLONE_NEWNS)` | 通过 | 一次调用同时建立三类命名空间，`mount` 与 `umount` 正常 |
 | `clone(CLONE_NEWUSER)` | 不支持 | 跨进程安装凭据的路径未实现，返回 `EOPNOTSUPP` |

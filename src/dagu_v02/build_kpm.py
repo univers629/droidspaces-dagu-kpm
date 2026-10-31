@@ -41,6 +41,7 @@ SOURCES = (
     "nat66.c",
     "userns.c",
     "userns_proc.c",
+    "userns_ns.c",
     "nat66/kp_lookup.c",
 )
 # IPv6 NAT: the kernel's own netfilter sources, compiled against the matching
