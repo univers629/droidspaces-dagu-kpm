@@ -27,6 +27,7 @@ SOURCES = (
     "msg_syscalls.c",
     "clone3.c",
     "devtmpfs.c",
+    "xt_addrtype.c",
     "reboot_syscalls.c",
     "pid_exit_guard.c",
     "pid_namespace.c",

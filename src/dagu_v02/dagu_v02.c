@@ -19,6 +19,7 @@
 #include "reboot_syscalls.h"
 #include "status_bridge.h"
 #include "usercopy.h"
+#include "xt_addrtype.h"
 
 #include <asm/current.h>
 #include <common.h>
@@ -160,6 +161,7 @@ static void partial_cleanup(void)
     dagu_reboot_syscalls_uninstall();
     dagu_clone3_uninstall();
     dagu_devtmpfs_uninstall();
+    dagu_xt_addrtype_uninstall();
     dagu_msg_syscalls_uninstall();
     dagu_sem_syscalls_uninstall();
     dagu_status_bridge_uninstall();
@@ -251,6 +253,16 @@ static long dagu_v02_init(const char *args, const char *event, void *reserved)
     rc = dagu_devtmpfs_install();
     if (rc)
         logkw("ds-dagu-v02: devtmpfs type unavailable rc=%d\n", rc);
+    rc = 0;
+    /*
+     * The kernel has no addrtype match, so iptables cannot build the rule
+     * dockerd adds to its NAT chain and the daemon exits. Registration is
+     * non-fatal: the match is only needed by callers that use it.
+     */
+    stage = "addrtype match";
+    rc = dagu_xt_addrtype_install();
+    if (rc)
+        logkw("ds-dagu-v02: addrtype match unavailable rc=%d\n", rc);
     rc = 0;
     stage = "reboot syscall isolation";
     if ((rc = dagu_reboot_syscalls_install()))
