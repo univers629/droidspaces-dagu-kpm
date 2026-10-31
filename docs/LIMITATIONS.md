@@ -7,6 +7,7 @@
 - **`clone3`：**目标内核的 `sys_call_table` 只有 435 项，`__NR_syscalls=435`，`scno >= 435` 直接走 `do_ni_syscall`，按 syscall 表项 hook 写入的是表外 rodata，回调不触发。实现改为 inline hook `el0_svc_common`，在 after 阶段调用六参数 `_do_fork` 后覆写 `regs->regs[0]`。fork、CLONE_THREAD 与参数校验路径已在设备验证。
 - **`devtmpfs` 文件系统类型：**KPM 复制 `shmem_fs_type` 并改名注册，`mount -t devtmpfs` 可用。驱动核心的自动节点维护在未启用 `CONFIG_DEVTMPFS` 的内核中不存在，挂载实例为空，节点由消费方按 sysfs 创建。目标镜像上该结构实例为 0x68 字节，拷贝以此为界。通用硬件访问未验收。
 - **`mqueue` 文件系统类型与 POSIX 消息队列：**目标内核没有该配置项时 `mount -t mqueue` 报 ENODEV，容器运行时在初始化阶段挂载该路径，失败即终止。文件系统类型复制 `shmem_fs_type` 改名注册，挂载实例为空，队列条目不出现在该挂载点。`mq_open`、`mq_unlink`、`mq_timedsend`、`mq_timedreceive` 与 `mq_getsetattr` 由 `mqueue_core.c` 在本模块内实现，队列对象按 fake IPC namespace 隔离，描述符是 anon-inode 文件。`mq_notify` 未实现，返回 ENOSYS。
+- **IPv6 NAT：**目标内核没有 `CONFIG_IP6_NF_NAT`，也没有 IPv6 的 `MASQUERADE` 目标，容器的 NAT 网络因此停留在 IPv4。KPM 内置内核树的 `ip6table_nat`、`nf_nat_l3proto_ipv6` 与 `nf_nat_masquerade_ipv6`，并注册 `NFPROTO_IPV6` 的 `MASQUERADE`；内核符号经 `nat66/shim.c` 间接调用。注册由内核线程延迟 10 秒执行：KPM 在 pre-kernel-init 加载，此时 netfilter 表尚未分配，同步注册会阻塞启动。MASQUERADE 的接口/地址通知器为空实现（`nf_ct_iterate_cleanup_net`、`__put_net` 未导出），旧连接靠超时清理。
 - **SysV 信号量：**四个 syscall 在该内核上返回 ENOSYS，实现经 `el0_svc_common` 拦截后由 KPM 提供，集合按 fake IPC namespace 隔离。`semget`、`semop`、`semtimedop` 与 `semctl` 的创建、属性、P/V、原子多操作和删除路径已在设备验证。
 
 ## 尚未实现

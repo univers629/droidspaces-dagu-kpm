@@ -34,6 +34,7 @@ flowchart LR
 | `ipc_namespace.c` | IPC namespace identity 与对象状态连接 |
 | `msg_core.c`、`msg_syscalls.c` | 当前实现的 SysV message queue 核心和系统调用路径 |
 | `mqueue.c` | `mqueue` 文件系统类型：复制 `shmem_fs_type` 改名注册 |
+| `nat66.c`、`nat66/*.c` | IPv6 NAT：内核 netfilter 源码经 `nat66/shim.c` 间接调用，注册由内核线程延迟执行 |
 | `mqueue_core.c`、`mqueue_syscalls.c` | POSIX 消息队列：队列对象挂在 fake IPC namespace 上，`mq_*` 系统调用经 `el0_svc_common` 拦截 |
 | `proc_bridge.c`、`status_bridge.c`、`proc_mount_refs.c`、`proc_root_dedup.c` | namespace link、`/proc` 状态与挂载引用表现 |
 | `pid_exit_guard.c` | PID 1 退出相关保护逻辑 |

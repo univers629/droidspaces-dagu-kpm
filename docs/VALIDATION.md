@@ -88,3 +88,18 @@ boot 镜像含 selinux KPM、本 KPM 与 IPv6 NAT KPM（KPImg 0.13.14）。
 
 测试在容器内以 Python `ctypes` 直接调用系统调用完成（180–185），未覆盖
 多线程阻塞唤醒与 signal 通知路径。
+
+## 2026-10-31 增量验证（IPv6 NAT）
+
+测试环境为 Xiaomi dagu（Android 14，Linux `4.19.157-perf-gb57830672689`），
+boot 镜像只含 selinux KPM 与合并了 IPv6 NAT 的本 KPM（KPImg 0.13.14）。
+
+| 范围 | 结果 | 边界 |
+| --- | --- | --- |
+| 加载时序 | 通过 | pre-kernel-init 排队，10 秒后在内核线程完成注册（`nat` 表出现） |
+| `droidspaces check` | 通过 | `[✓] IPv6 NAT support` |
+| 容器地址与路由 | 通过 | 容器获得 `fd64:7370::/64` 地址与 `fe80::1` 默认路由 |
+| 容器出网 | 通过 | `ipv6.baidu.com` HTTP 200；conntrack 记录源地址被替换为主机公网地址 |
+| 卸载 | 不适用 | KPM 的 unload 已被现有守卫拒绝 |
+
+容器侧配置（`IPv6AcceptRA=no`、静态地址单元、`--dns`）不属于 KPM，记录在工作区的 `tools/container-net/`。

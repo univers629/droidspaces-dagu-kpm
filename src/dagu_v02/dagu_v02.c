@@ -8,6 +8,7 @@
 #include "mqueue.h"
 #include "mqueue_core.h"
 #include "mqueue_syscalls.h"
+#include "nat66.h"
 #include "msg_core.h"
 #include "msg_syscalls.h"
 #include "sem_core.h"
@@ -169,6 +170,7 @@ static void partial_cleanup(void)
     dagu_msg_syscalls_uninstall();
     dagu_sem_syscalls_uninstall();
     dagu_mq_syscalls_uninstall();
+    dagu_nat66_uninstall();
     dagu_status_bridge_uninstall();
     dagu_proc_bridge_uninstall();
     dagu_proc_root_dedup_uninstall();
@@ -209,6 +211,9 @@ static long dagu_v02_init(const char *args, const char *event, void *reserved)
     stage = "mqueue core";
     if ((rc = dagu_mq_core_bind()))
         goto fail;
+    stage = "ipv6 nat";
+    if ((rc = dagu_nat66_bind()))
+        goto fail;
     stage = "pid namespace";
     if ((rc = dagu_pid_namespace_bind()))
         goto fail;
@@ -243,6 +248,9 @@ static long dagu_v02_init(const char *args, const char *event, void *reserved)
         goto fail;
     stage = "mqueue syscalls";
     if ((rc = dagu_mq_syscalls_install()))
+        goto fail;
+    stage = "ipv6 nat";
+    if ((rc = dagu_nat66_install()))
         goto fail;
     /*
      * This kernel has no sys_clone3, so clone3.c supplies one through

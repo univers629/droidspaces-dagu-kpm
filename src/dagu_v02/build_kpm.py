@@ -38,7 +38,38 @@ SOURCES = (
     "proc_mount_refs.c",
     "proc_root_dedup.c",
     "status_bridge.c",
+    "nat66.c",
+    "nat66/kp_lookup.c",
 )
+# IPv6 NAT: the kernel's own netfilter sources, compiled against the matching
+# 4.19 headers. Every kernel symbol they call goes through nat66/shim.c.
+KERNEL_TREE = Path(os.environ.get(
+    "KERNEL_TREE", ROOT.parent.parent / "ref/dagu-kernel")).expanduser()
+KERNEL_OUT = Path(os.environ.get("KERNEL_OUT", Path.home() / "kbuild-dagu")).expanduser()
+NAT66_SOURCES = (
+    "nat66/shim.c",
+    "nat66/nf_nat_l3proto_ipv6.c",
+    "nat66/nf_nat_proto_icmpv6.c",
+    "nat66/nf_nat_masquerade_ipv6.c",
+    "nat66/ip6table_nat.c",
+    "nat66/xt_masq6.c",
+)
+NAT66_SHIMS = (
+    "__nf_nat_l4proto_find", "csum_ipv6_magic", "dst_release",
+    "inet_proto_csum_replace16", "inet_proto_csum_replace4",
+    "ip6_route_me_harder", "ip6t_alloc_initial_table", "ip6t_do_table",
+    "ip6t_register_table", "ip6t_unregister_table", "ipv6_dev_get_saddr",
+    "ipv6_skip_exthdr", "kfree", "nf_ct_invert_tuplepr", "nf_ct_nat_ext_add",
+    "nf_ct_netns_get", "nf_ct_netns_put", "nf_ip6_checksum", "nf_nat_inet_fn",
+    "nf_nat_l3proto_register", "nf_nat_l3proto_unregister",
+    "nf_nat_l4proto_nlattr_to_range", "nf_nat_l4proto_register",
+    "nf_nat_l4proto_unregister", "nf_nat_register_fn", "nf_nat_setup_info",
+    "nf_nat_unregister_fn", "nf_nat_used_tuple", "nf_xfrm_me_harder",
+    "nla_memcpy", "register_pernet_subsys", "secure_ipv6_port_ephemeral",
+    "skb_checksum", "skb_make_writable", "unregister_pernet_subsys",
+    "xt_register_target", "xt_unregister_target", "printk",
+)
+
 OUT = PROJECT / "build"
 KPM = OUT / "ds_dagu_v02_v0.3.0-dev1.kpm"
 
@@ -87,6 +118,37 @@ def main() -> None:
         symbols = run(str(llvm_readelf), "-s", str(obj))
         if "__aarch64_" in symbols:
             raise RuntimeError(f"Unexpected outlined atomic import in {obj.name}")
+        objects.append(obj)
+
+    kernel_includes = (
+        KERNEL_TREE / "arch/arm64/include",
+        KERNEL_OUT / "arch/arm64/include/generated",
+        KERNEL_TREE / "include",
+        KERNEL_OUT / "include",
+        KERNEL_TREE / "arch/arm64/include/uapi",
+        KERNEL_OUT / "arch/arm64/include/generated/uapi",
+        KERNEL_TREE / "include/uapi",
+        KERNEL_OUT / "include/generated/uapi",
+    )
+    clang_include = Path(run(str(clang), "-print-resource-dir").strip()) / "include"
+    for source_name in NAT66_SOURCES:
+        source = PROJECT / source_name
+        obj = OUT / (source.stem + ".ko.o")
+        renames = () if source.stem == "shim" else tuple(
+            f"-D{name}=ds_sym_{name}" for name in NAT66_SHIMS)
+        run(str(clang), "-target", "aarch64-linux-gnu",
+            "-std=gnu89", "-O2", "-nostdinc", "-isystem", str(clang_include),
+            *(f"-I{path}" for path in kernel_includes),
+            "-include", str(KERNEL_TREE / "include/linux/kconfig.h"),
+            "-include", str(KERNEL_TREE / "include/linux/compiler_types.h"),
+            "-D__KERNEL__", "-DMODULE", "-DKASAN_SHADOW_SCALE_SHIFT=3",
+            "-DCONFIG_AS_LSE=1", "-mlittle-endian", "-fno-PIE", "-fno-pic",
+            "-fno-stack-protector", "-fno-asynchronous-unwind-tables",
+            "-fno-delete-null-pointer-checks", "-mno-implicit-float",
+            "-Qunused-arguments", "-Wno-everything",
+            f'-DKBUILD_BASENAME="{source.stem}"',
+            f'-DKBUILD_MODNAME="{source.stem}"',
+            *renames, "-c", str(source), "-o", str(obj))
         objects.append(obj)
 
     run(str(ld_lld), "-m", "aarch64elf", "-r",
