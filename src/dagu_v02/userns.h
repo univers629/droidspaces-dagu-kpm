@@ -8,6 +8,9 @@ void dagu_userns_uninstall(void);
 unsigned int dagu_userns_live(void);
 void dagu_userns_hold(void *ns);
 int dagu_userns_is_record(void *ns);
+int dagu_userns_begin_clone(void **record);
+void dagu_userns_clone_end(void);
+long dagu_userns_install_ns(void *target);
 
 int dagu_userns_proc_bind(void);
 

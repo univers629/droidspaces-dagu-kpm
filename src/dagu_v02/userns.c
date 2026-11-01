@@ -90,6 +90,7 @@ struct dagu_userns {
 typedef void *(*prepare_creds_fn)(void);
 typedef int (*commit_creds_fn)(void *);
 typedef void *(*create_new_namespaces_fn)(unsigned long, void *, void *, void *);
+typedef int (*ns_capable_fn)(void *, int);
 
 static struct dagu_userns pool[DAGU_USERNS_MAX];
 static unsigned int pool_lock;
@@ -102,6 +103,7 @@ static void *init_ns_ops_ptr;
 static prepare_creds_fn prepare_creds_ptr;
 static commit_creds_fn commit_creds_ptr;
 static create_new_namespaces_fn create_new_namespaces_ptr;
+static ns_capable_fn ns_capable_ptr;
 
 static void *ksys_unshare_addr;
 static void *copy_creds_addr;
@@ -276,7 +278,12 @@ static struct dagu_userns *userns_create(void *parent)
     if (!__atomic_load_n(&installed, __ATOMIC_ACQUIRE) ||
         !__atomic_load_n(&layout_ok, __ATOMIC_ACQUIRE))
         return 0;
-    if (parent && parent != init_user_ns_ptr)
+    /*
+     * Records may nest: a container that already runs in one can create
+     * another for a service that asks for its own namespace. The parent
+     * pointer is always a live pool slot, never an arbitrary address.
+     */
+    if (parent && !slot_of_record(record_of((struct dagu_userns *)parent)))
         return 0;
 
     lock_pool();
@@ -425,9 +432,29 @@ static void copy_creds_before(hook_fargs2_t *args, void *udata)
 {
     unsigned long flags = (unsigned long)args->arg1;
     struct dagu_userns *u;
+    void *parked;
     (void)udata;
 
     args->local.data0 = 0;
+    args->local.data1 = 0;
+    /*
+     * clone(CLONE_NEWUSER | CLONE_NEWPID) builds the pid namespace before
+     * copy_creds runs, so the namespace that will own it has to exist first.
+     * clone_before() creates it, parks it here, and drops the flag from the
+     * clone call; this hook adopts the parked record instead of making a
+     * second one.
+     */
+    parked = pending_get(current);
+    if (parked) {
+        u = slot_of_record(parked);
+        if (u) {
+            args->local.data0 = (unsigned long)u;
+            args->local.data1 = 1;
+            if (flags & DAGU_CLONE_NEWUSER)
+                args->arg1 = flags & ~DAGU_CLONE_NEWUSER;
+            return;
+        }
+    }
     if (!(flags & DAGU_CLONE_NEWUSER) || (flags & DAGU_CLONE_THREAD))
         return;
     u = userns_create(slot_of_record(dagu_load_ptr(dagu_load_ptr(current, TASK_CRED), CRED_USER_NS)));
@@ -449,6 +476,8 @@ static void copy_creds_after(hook_fargs2_t *args, void *udata)
 
     if (!u)
         return;
+    if (args->local.data1)
+        pending_clear(current);
     if (args->ret) {
         userns_put(u);
         return;
@@ -456,6 +485,73 @@ static void copy_creds_after(hook_fargs2_t *args, void *udata)
     cred = dagu_load_ptr(task, TASK_CRED);
     if (cred)
         install_cred(cred, u);
+}
+
+/*
+ * Create the namespace a clone(CLONE_NEWUSER | ...) child will live in and
+ * park it for copy_creds(). The returned pointer is the record, which the
+ * caller uses as the owner of the other namespaces it builds.
+ */
+int dagu_userns_begin_clone(void **record)
+{
+    void *cred = dagu_load_ptr(current, TASK_CRED);
+    struct dagu_userns *u;
+
+    if (!record)
+        return DAGU_EINVAL;
+    *record = 0;
+    u = userns_create(cred ? slot_of_record(dagu_load_ptr(cred, CRED_USER_NS)) : 0);
+    if (!u)
+        return DAGU_ENOMEM;
+    pending_set(current, record_of(u));
+    *record = record_of(u);
+    return 0;
+}
+
+/* Release a parked record the clone path did not consume. */
+void dagu_userns_clone_end(void)
+{
+    void *parked = pending_get(current);
+
+    if (!parked)
+        return;
+    pending_clear(current);
+    userns_put(slot_of_record(parked));
+}
+
+/*
+ * setns() on /proc/<pid>/ns/user: the caller must hold CAP_SYS_ADMIN in the
+ * target namespace, which for these records means being root in it or in its
+ * parent chain.
+ */
+long dagu_userns_install_ns(void *target)
+{
+    struct dagu_userns *u = 0;
+    void *cred;
+
+    if (!target || !ns_capable_ptr || !prepare_creds_ptr || !commit_creds_ptr)
+        return DAGU_EINVAL;
+    if (target != init_user_ns_ptr) {
+        u = slot_of_record(target);
+        if (!u)
+            return DAGU_EINVAL;
+    }
+    if (!ns_capable_ptr(target, DAGU_CAP_SYS_ADMIN))
+        return -1L;
+
+    cred = prepare_creds_ptr();
+    if (!cred)
+        return DAGU_ENOMEM;
+    if (u) {
+        __atomic_add_fetch(&u->refs, 1U, __ATOMIC_RELAXED);
+        install_cred(cred, u);
+    } else {
+        dagu_store_ptr(cred, CRED_USER_NS, init_user_ns_ptr);
+        set_caps(cred, CRED_CAP_PERM, 0xffffffffU);
+        set_caps(cred, CRED_CAP_EFF, 0xffffffffU);
+    }
+    commit_creds_ptr(cred);
+    return 0;
 }
 
 /* unshare_nsproxy_namespaces(flags, new_nsp, new_cred, new_fs) */
@@ -688,6 +784,7 @@ int dagu_userns_bind(void)
         (create_new_namespaces_fn)kallsyms_lookup_name("create_new_namespaces");
     ksys_unshare_addr = (void *)kallsyms_lookup_name("ksys_unshare");
     copy_creds_addr = (void *)kallsyms_lookup_name("copy_creds");
+    ns_capable_ptr = (ns_capable_fn)kallsyms_lookup_name("ns_capable");
     unshare_nsproxy_addr = (void *)kallsyms_lookup_name("unshare_nsproxy_namespaces");
     inode_cap_addr = (void *)kallsyms_lookup_name("capable_wrt_inode_uidgid");
     copy_mnt_ns_addr = (void *)kallsyms_lookup_name("copy_mnt_ns");

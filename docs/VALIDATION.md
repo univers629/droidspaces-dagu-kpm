@@ -171,7 +171,7 @@ MAC 的帧交给网络栈，容器 `eth0` 的 DHCP 请求能发出而回应收�
 未覆盖：`SHM_LOCK`/`SHM_UNLOCK` 的实际语义（实现为空操作），进程退出而未 `shmdt`
 时 `nattch` 的回记，以及 `/proc/sysvipc/shm`（该内核不提供）。
 
-## 2026-11-01 增量验证（`mq_notify`）
+## 2026-11-01 增量验证（`mq_notify`、`clone(CLONE_NEWUSER)` 与 `setns()`）
 
 测试环境同上，KPM 以 fastboot 临时启动的内核镜像加载（另含 selinux KPM）。
 
@@ -180,5 +180,11 @@ MAC 的帧交给网络栈，容器 `eth0` 的 DHCP 请求能发出而回应收�
 | `mq_notify` 注册 | 通过 | `SIGEV_SIGNAL` 注册返回 0，重复注册返回 `EBUSY`，`NULL` 注销返回 0，再次注销返回 `EINVAL` |
 | `mq_notify` 投递 | 通过 | 队列空时由另一进程送入消息触发信号，处理函数的 `si_value` 与注册值一致（`0x1234`），`si_code` 为 `SI_MESGQ`；同一次注册收到第二条消息时不再触发（一次性语义） |
 | `mq_notify` 边界 | 通过 | `SIGEV_THREAD` 与非法信号编号返回 `EINVAL`；`SIGEV_NONE` 只登记不投递 |
+| `clone(CLONE_NEWUSER)` | 通过 | 单独调用与 `CLONE_NEWNS`、`CLONE_NEWPID`、`CLONE_NEWIPC`、`CLONE_NEWPID\|CLONE_NEWNS` 组合均成功，子进程读到恒等映射 |
+| 嵌套命名空间 | 通过 | 新建的命名空间内再次 `unshare(CLONE_NEWUSER)` 成功，父级仍可对其检查 `ns_capable()` |
+| `/proc/<pid>/ns/user` 的 `setns()` | 通过 | 打开目标条目的 fd 后 `setns()` 返回 0，`readlink /proc/self/ns/user` 变为目标的 inode；对初始命名空间的 `setns()` 返回 `EPERM`（层级规则） |
+| 容器内嵌套 | 通过 | 容器 `kdeanland` 内 `unshare -U` 后再 `unshare -U`，两层均成功并读到恒等映射 |
+| 回归 | 通过 | `mq_open`/`mq_send`/`mq_receive`、`unshare(U\|P\|M)`、PID/MOUNT 依次 `unshare`、`droidspaces check` 的 Sandboxing 项均正常 |
 
-未覆盖：`SIGEV_THREAD`（内核返回 `EINVAL`，glibc 未在此内核上模拟）与多进程同时注册同一队列的竞争。
+未覆盖：`SIGEV_THREAD`（内核返回 `EINVAL`，glibc 未在此内核上模拟）、
+多进程同时注册同一队列的竞争，以及 `setns()` 到初始命名空间之外的非 record 条目。

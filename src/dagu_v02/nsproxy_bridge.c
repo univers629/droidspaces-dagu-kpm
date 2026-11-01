@@ -254,10 +254,6 @@ static void clone_before(hook_fargs5_t *args, void *unused)
         clone_fail(args, DAGU_EINVAL);
         return;
     }
-    if (flags & DAGU_CLONE_NEWUSER) {
-        clone_fail(args, DAGU_EOPNOTSUPP);
-        return;
-    }
     owner = init_user_ns_ptr;
     cred = dagu_load_ptr(current, DAGU_TASK_CRED);
     if (cred) {
@@ -265,6 +261,23 @@ static void clone_before(hook_fargs5_t *args, void *unused)
 
         if (dagu_userns_is_record(cred_ns))
             owner = cred_ns;
+    }
+    if (flags & DAGU_CLONE_NEWUSER) {
+        /*
+         * The pid and IPC namespaces built below have to be owned by the
+         * child's new user namespace, which copy_creds() would otherwise
+         * create after them. Make it here, park it for copy_creds(), and
+         * drop the flag from the flags the kernel sees.
+         */
+        void *record = 0;
+        long rc = dagu_userns_begin_clone(&record);
+
+        if (rc) {
+            clone_fail(args, rc);
+            return;
+        }
+        owner = record;
+        flags &= ~DAGU_CLONE_NEWUSER;
     }
     if (!owner || !ns_capable_ptr(owner, DAGU_CAP_SYS_ADMIN)) {
         clone_fail(args, DAGU_EPERM);
@@ -345,6 +358,11 @@ static void clone_after(hook_fargs5_t *args, void *unused)
     void *restore_proxy;
     void *parent_task;
     (void)unused;
+    /*
+     * A record parked for copy_creds() is consumed there; anything left over
+     * means the clone failed before that point and the slot has to be freed.
+     */
+    dagu_userns_clone_end();
     if (args->local.data2 != DAGU_CLONE_CONTEXT_MAGIC)
         return;
     parent_task = (void *)args->local.data1;

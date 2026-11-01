@@ -9,9 +9,9 @@
  * including the symlink target and the nsfs inode behind it, is the kernel's
  * own code, driven by the operations table installed here.
  *
- * The table only reports the namespace. There is no install callback: setns()
- * would have to replace the credentials of the calling task, which the module
- * owning the namespaces does not expose.
+ * The install callback hands the transition to the namespace code that owns the
+ * records: setns() replaces the calling task's credentials with ones in the
+ * target namespace after the target's capability check passes.
  */
 #include "abi.h"
 #include "userns.h"
@@ -85,12 +85,19 @@ static void userns_ns_put(void *ns)
     (void)ns;
 }
 
+static long install_target(void *ns);
+
+static long install_target(void *ns)
+{
+    return dagu_userns_install_ns(ns);
+}
+
 static int userns_ns_install(void *nsproxy, void *ns)
 {
     (void)nsproxy;
-    (void)ns;
-
-    return -22;                                 /* -EINVAL */
+    if (!ns)
+        return -22;
+    return (int)install_target((char *)ns - UNS_NS);
 }
 
 static void *userns_ns_owner(void *ns)
