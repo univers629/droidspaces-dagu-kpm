@@ -87,7 +87,25 @@ struct dagu_userns {
     unsigned int live;
 };
 
+/*
+ * Every count is bounded: a runaway holder or reference count means a caller
+ * lost track of a record, and letting the counts wrap would release a
+ * namespace another credential still points at.
+ */
+#define DAGU_USERNS_COUNT_MAX (1U << 20)
+
+static int userns_warned;
+
+static void userns_warn(const char *what)
+{
+    if (userns_warned)
+        return;
+    userns_warned = 1;
+    logki("ds-dagu-userns: %s\n", what);
+}
+
 typedef void *(*prepare_creds_fn)(void);
+typedef void (*abort_creds_fn)(void *);
 typedef int (*commit_creds_fn)(void *);
 typedef void *(*create_new_namespaces_fn)(unsigned long, void *, void *, void *);
 typedef int (*ns_capable_fn)(void *, int);
@@ -101,6 +119,7 @@ static unsigned int live_count;
 static void *init_user_ns_ptr;
 static void *init_ns_ops_ptr;
 static prepare_creds_fn prepare_creds_ptr;
+static abort_creds_fn abort_creds_ptr;
 static commit_creds_fn commit_creds_ptr;
 static create_new_namespaces_fn create_new_namespaces_ptr;
 static ns_capable_fn ns_capable_ptr;
@@ -310,6 +329,34 @@ static struct dagu_userns *userns_create(void *parent)
     return u;
 }
 
+static int userns_get(unsigned int *field)
+{
+    unsigned int old = __atomic_load_n(field, __ATOMIC_RELAXED);
+
+    for (;;) {
+        if (old >= DAGU_USERNS_COUNT_MAX) {
+            userns_warn("reference count past its limit");
+            return -1;
+        }
+        if (__atomic_compare_exchange_n(field, &old, old + 1U, 1,
+                                        __ATOMIC_ACQ_REL, __ATOMIC_RELAXED))
+            return 0;
+    }
+}
+
+static int userns_drop(unsigned int *field)
+{
+    unsigned int old = __atomic_load_n(field, __ATOMIC_RELAXED);
+
+    for (;;) {
+        if (old == 0U)
+            return -1;
+        if (__atomic_compare_exchange_n(field, &old, old - 1U, 1,
+                                        __ATOMIC_ACQ_REL, __ATOMIC_RELAXED))
+            return 0;
+    }
+}
+
 /*
  * The credential is not the only reference: a mount or pid namespace keeps
  * the namespace it was created in, and the kernel releases those through
@@ -321,16 +368,21 @@ void dagu_userns_hold(void *ns)
 {
     struct dagu_userns *u = slot_of_record(ns);
 
-    if (u)
-        __atomic_add_fetch(&u->holders, 1U, __ATOMIC_RELAXED);
+    if (!u)
+        return;
+    (void)userns_get(&u->holders);
 }
 
 static void userns_put(struct dagu_userns *u)
 {
     if (!u)
         return;
-    if (__atomic_load_n(&u->refs, __ATOMIC_RELAXED) > 0)
-        __atomic_sub_fetch(&u->refs, 1U, __ATOMIC_RELAXED);
+    if (!__atomic_load_n(&u->live, __ATOMIC_ACQUIRE))
+        return;
+    if (userns_drop(&u->refs)) {
+        userns_warn("record released twice");
+        return;
+    }
     if (__atomic_load_n(&u->refs, __ATOMIC_ACQUIRE) ||
         __atomic_load_n(&u->holders, __ATOMIC_ACQUIRE))
         return;
@@ -533,7 +585,7 @@ long dagu_userns_install_ns(void *target)
         return DAGU_EINVAL;
     if (target != init_user_ns_ptr) {
         u = slot_of_record(target);
-        if (!u)
+        if (!u || !__atomic_load_n(&u->live, __ATOMIC_ACQUIRE))
             return DAGU_EINVAL;
     }
     if (!ns_capable_ptr(target, DAGU_CAP_SYS_ADMIN))
@@ -543,7 +595,11 @@ long dagu_userns_install_ns(void *target)
     if (!cred)
         return DAGU_ENOMEM;
     if (u) {
-        __atomic_add_fetch(&u->refs, 1U, __ATOMIC_RELAXED);
+        if (userns_get(&u->refs)) {
+            if (abort_creds_ptr)
+                abort_creds_ptr(cred);
+            return DAGU_EINVAL;
+        }
         install_cred(cred, u);
     } else {
         dagu_store_ptr(cred, CRED_USER_NS, init_user_ns_ptr);
@@ -779,6 +835,7 @@ int dagu_userns_bind(void)
 
     init_user_ns_ptr = (void *)kallsyms_lookup_name("init_user_ns");
     prepare_creds_ptr = (prepare_creds_fn)kallsyms_lookup_name("prepare_creds");
+    abort_creds_ptr = (abort_creds_fn)kallsyms_lookup_name("abort_creds");
     commit_creds_ptr = (commit_creds_fn)kallsyms_lookup_name("commit_creds");
     create_new_namespaces_ptr =
         (create_new_namespaces_fn)kallsyms_lookup_name("create_new_namespaces");
