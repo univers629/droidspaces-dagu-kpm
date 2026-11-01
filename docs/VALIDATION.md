@@ -39,7 +39,7 @@
 | SysV 消息队列 | 通过 | `msgget`、`msgsnd`、`msgrcv`、`msgctl(STAT\|SET\|RMID)`；`ns_smoke ipc_object` 覆盖 host 与 fake IPC namespace 的同 key 隔离及跨 namespace 不可见 |
 | PID/IPC namespace 回归 | 通过 | `ns_smoke pid/ipc`、`ns_advanced clone_pid/clone3/stress`、`ns_setns_pid_for_children`、`ns_setns_pid_ancestry`、`ns_setns_ipc_matrix`、`ns_setns_pid_ipc_orders` 十项全部 exit=0 |
 
-未覆盖：SysV 信号量与共享内存、POSIX 消息队列（`semget`、`shmget`、`mq_open` 仍返回 ENOSYS）、user namespace。
+未覆盖：POSIX 消息队列（`mq_open` 仍返回 ENOSYS）、user namespace（见后续增量记录）。
 
 ### devtmpfs 文件系统类型
 
@@ -70,7 +70,7 @@
 
 ## 未实现或未验收
 
-SysV shared memory 与 POSIX message queue 尚未实现。`devtmpfs` 文件系统类型可用，通用硬件访问未验证；user namespace 沙箱未启用。完整 `_patchHarmony` 对等、并发容器 namespace 唯一性和任意 `setns()` 组合不在本次通过范围。
+POSIX message queue 尚未实现。`devtmpfs` 文件系统类型可用，通用硬件访问未验证；user namespace 沙箱未启用。完整 `_patchHarmony` 对等、并发容器 namespace 唯一性和任意 `setns()` 组合不在本次通过范围。
 
 公开复验入口见 [开发指南](DEVELOPMENT.md)。构建测试 helper 不会自动连接设备或刷写 boot；设备行为测试必须在兼容的专用测试设备上由所有者自行执行。
 
@@ -149,3 +149,24 @@ boot 镜像含 selinux KPM 与本 KPM（KPImg 0.13.14）。
 无线接口作下级设备时只验证到发送方向：`wlan0` 的站点模式驱动不会把目的地址为其它
 MAC 的帧交给网络栈，容器 `eth0` 的 DHCP 请求能发出而回应收不到，接收计数保持为 0。
 这是无线驱动的限制，不是模块的分发路径；以太网、`veth` 与网卡直通场景按上表验证。
+
+## 2026-11-01 增量验证（SysV 共享内存）
+
+测试环境同上一节，通过 fastboot 临时启动带本 KPM 的 boot 镜像。段由
+`shm_core.c` 提供，`shmget`、`shmat`、`shmdt` 与 `shmctl` 经 `el0_svc_common`
+拦截后进入该实现。
+
+| 范围 | 结果 | 边界 |
+| --- | --- | --- |
+| 创建与查找 | 通过 | 同 key 的 `shmget` 返回同一 id，`IPC_CREAT\|IPC_EXCL` 对已存在的 key 返回 `EEXIST`，`IPC_PRIVATE` 每次新建 |
+| 映射与解除映射 | 通过 | `shmat` 返回可用地址，写入的数据在 `shmdt` 前对同段的其他映射可见；对未映射地址调用 `shmdt` 返回 `EINVAL` |
+| 跨进程共享 | 通过 | 两个独立进程先后 `shmget` 同一 key 并 `shmat`，后写者能读到先写者写入的内容 |
+| 固定地址映射 | 通过 | `shmat(id, 0x50000000, SHM_RND)` 返回 `0x50000000` |
+| `IPC_STAT` | 通过 | `shm_segsz`、`shm_nattch` 与 `shm_cpid` 与操作一致，解除映射后 `shm_nattch` 回落 |
+| `IPC_RMID` | 通过 | 删除后按 key 查找返回 `ENOENT`，`IPC_PRIVATE` 段同样可以删除 |
+| 大段与压力 | 通过 | 32 MiB 段可创建、首尾页可写；200 轮「创建-映射-写-解除-删除」全部成功 |
+| 容器内使用 | 通过 | 容器 `kdeanland` 内 `ipcmk -M 4096` 成功，`ipcs -m` 列出该段（key、shmid、owner、perms、字节数），随后可删除 |
+| SysV IPC 回归 | 通过 | 同一镜像上 `msgget`/`msgsnd`/`msgrcv`/`msgctl` 与 `semget`/`semop`/`semctl` 仍正常 |
+
+未覆盖：`SHM_LOCK`/`SHM_UNLOCK` 的实际语义（实现为空操作），进程退出而未 `shmdt`
+时 `nattch` 的回记，以及 `/proc/sysvipc/shm`（该内核不提供）。

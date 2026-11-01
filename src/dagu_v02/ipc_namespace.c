@@ -64,6 +64,7 @@ void dagu_ipc_namespace_put(struct dagu_ipc_namespace *ns)
         dagu_msg_destroy_all(ns);
         dagu_sem_destroy_all(ns);
         dagu_mq_destroy_all(ns);
+        dagu_shm_destroy_all(ns);
         free_inum_ptr(ns->common.inum);
         kfree_ptr(ns);
     }

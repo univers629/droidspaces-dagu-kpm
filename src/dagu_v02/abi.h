@@ -13,6 +13,7 @@
 #define DAGU_TASK_CRED                  0x7e8U
 #define DAGU_CRED_USER_NS               0x88U
 #define DAGU_TASK_NSPROXY               0x818U
+#define DAGU_TASK_MM                    0x588U
 
 #define DAGU_NSPROXY_IPC                0x10U
 #define DAGU_NSPROXY_MNT                0x18U

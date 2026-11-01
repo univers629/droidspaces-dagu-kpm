@@ -13,7 +13,8 @@
 #include "msg_core.h"
 #include "msg_syscalls.h"
 #include "sem_core.h"
-#include "sem_syscalls.h"
+#include "shm_core.h"
+#include "sysv_syscalls.h"
 #include "nsproxy_bridge.h"
 #include "pid_exit_guard.h"
 #include "pid_lifecycle.h"
@@ -169,7 +170,7 @@ static void partial_cleanup(void)
     dagu_mqueue_uninstall();
     dagu_xt_addrtype_uninstall();
     dagu_msg_syscalls_uninstall();
-    dagu_sem_syscalls_uninstall();
+    dagu_sysv_syscalls_uninstall();
     dagu_mq_syscalls_uninstall();
     dagu_nat66_uninstall();
     dagu_userns_uninstall();
@@ -210,6 +211,9 @@ static long dagu_v02_init(const char *args, const char *event, void *reserved)
     stage = "semaphore core";
     if ((rc = dagu_sem_core_bind()))
         goto fail;
+    stage = "shared memory core";
+    if ((rc = dagu_shm_core_bind()))
+        goto fail;
     stage = "mqueue core";
     if ((rc = dagu_mq_core_bind()))
         goto fail;
@@ -248,8 +252,8 @@ static long dagu_v02_init(const char *args, const char *event, void *reserved)
     stage = "message syscalls";
     if ((rc = dagu_msg_syscalls_install()))
         goto fail;
-    stage = "semaphore syscalls";
-    if ((rc = dagu_sem_syscalls_install()))
+    stage = "sysv syscalls";
+    if ((rc = dagu_sysv_syscalls_install()))
         goto fail;
     stage = "mqueue syscalls";
     if ((rc = dagu_mq_syscalls_install()))

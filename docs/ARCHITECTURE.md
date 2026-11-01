@@ -33,6 +33,7 @@ flowchart LR
 | `pid_namespace.c`、`pid_lifecycle.c` | PID namespace 状态、进程身份和生命周期管理 |
 | `ipc_namespace.c` | IPC namespace identity 与对象状态连接 |
 | `msg_core.c`、`msg_syscalls.c` | 当前实现的 SysV message queue 核心和系统调用路径 |
+| `sem_core.c`、`shm_core.c`、`sysv_syscalls.c` | SysV semaphore 与 shared memory 核心，四个 semaphore 与四个 shared memory 系统调用共用 `el0_svc_common` 拦截 |
 | `mqueue.c` | `mqueue` 文件系统类型：复制 `shmem_fs_type` 改名注册 |
 | `nat66.c`、`nat66/*.c` | IPv6 NAT：内核 netfilter 源码经 `nat66/shim.c` 间接调用，注册由内核线程延迟执行 |
 | `userns.c` | User namespace：命名空间记录、凭据安装、挂载路径与 superblock 归属修正 |
@@ -58,9 +59,9 @@ flowchart LR
 
 ## 当前支持边界
 
-在已验证设备上，PID/IPC `unshare()`、PID 1、部分 `clone()`/`setns()` 路径、SysV 消息队列隔离及 Droidspaces 核心容器流程通过记录的检查；后续开发候选版本完成有界的并发容器和 `setns()` 矩阵检查。以下尚未实现或未验收：SysV shared memory、任意 `setns()` 组合、非恒等 id 映射、完整硬件访问和完整上游功能对等；macvlan 由独立模块提供，未实现在本仓库的 KPM 内。`devtmpfs` 文件系统类型已实现，节点填充由消费方完成。
+在已验证设备上，PID/IPC `unshare()`、PID 1、部分 `clone()`/`setns()` 路径、SysV 消息队列隔离及 Droidspaces 核心容器流程通过记录的检查；后续开发候选版本完成有界的并发容器和 `setns()` 矩阵检查。以下尚未实现或未验收：任意 `setns()` 组合、非恒等 id 映射、完整硬件访问和完整上游功能对等；macvlan 由独立模块提供，未实现在本仓库的 KPM 内。`devtmpfs` 文件系统类型已实现，节点填充由消费方完成。
 
-这些是此开发快照的已知缺口，不应描述为已经支持或已经证明不可能实现。user namespace 和通用硬件访问还缺少安全且可验证的目标 ABI/生命周期路径；SysV shared memory 尚无实现，POSIX mqueue 的 `mq_notify` 未实现。有限的并发与 `setns()` 检查不证明任意组合或规模均正确。详见[限制与未实现功能](LIMITATIONS.md)。
+这些是此开发快照的已知缺口，不应描述为已经支持或已经证明不可能实现。user namespace 和通用硬件访问还缺少安全且可验证的目标 ABI/生命周期路径；POSIX mqueue 的 `mq_notify` 未实现。有限的并发与 `setns()` 检查不证明任意组合或规模均正确。详见[限制与未实现功能](LIMITATIONS.md)。
 
 ## 维护约束
 

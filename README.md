@@ -12,7 +12,7 @@ v0.2.0 候选版本已在一台 dagu Android 15 / Linux 4.19.157 设备上完成
 
 当前明确限制：
 
-- SysV shared memory 和 POSIX message queue 尚未实现。
+- SysV IPC 的消息队列、信号量与共享内存已由 KPM 提供；POSIX `mq_notify` 与恒等映射之外的用户命名空间映射尚未实现。
 - `devtmpfs` 文件系统类型已实现，挂载实例为空，节点由消费方按 sysfs 创建；通用硬件访问未验收。
 - synthetic user namespace 未实现；本项目不提供 user namespace 沙箱。
 - 任意 `setns()` 组合、无限并发规模和完整 `_patchHarmony` 功能对等尚未验证。
