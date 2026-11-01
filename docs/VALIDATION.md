@@ -170,3 +170,15 @@ MAC 的帧交给网络栈，容器 `eth0` 的 DHCP 请求能发出而回应收�
 
 未覆盖：`SHM_LOCK`/`SHM_UNLOCK` 的实际语义（实现为空操作），进程退出而未 `shmdt`
 时 `nattch` 的回记，以及 `/proc/sysvipc/shm`（该内核不提供）。
+
+## 2026-11-01 增量验证（`mq_notify`）
+
+测试环境同上，KPM 以 fastboot 临时启动的内核镜像加载（另含 selinux KPM）。
+
+| 范围 | 结果 | 边界 |
+| --- | --- | --- |
+| `mq_notify` 注册 | 通过 | `SIGEV_SIGNAL` 注册返回 0，重复注册返回 `EBUSY`，`NULL` 注销返回 0，再次注销返回 `EINVAL` |
+| `mq_notify` 投递 | 通过 | 队列空时由另一进程送入消息触发信号，处理函数的 `si_value` 与注册值一致（`0x1234`），`si_code` 为 `SI_MESGQ`；同一次注册收到第二条消息时不再触发（一次性语义） |
+| `mq_notify` 边界 | 通过 | `SIGEV_THREAD` 与非法信号编号返回 `EINVAL`；`SIGEV_NONE` 只登记不投递 |
+
+未覆盖：`SIGEV_THREAD`（内核返回 `EINVAL`，glibc 未在此内核上模拟）与多进程同时注册同一队列的竞争。

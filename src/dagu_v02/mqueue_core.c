@@ -45,6 +45,7 @@
 #define DAGU_MQ_ENOMEM       (-12L)
 #define DAGU_MQ_EFAULT       (-14L)
 #define DAGU_MQ_EEXIST       (-17L)
+#define DAGU_MQ_EBUSY        (-16L)
 #define DAGU_MQ_EINVAL       (-22L)
 #define DAGU_MQ_EMFILE       (-24L)
 #define DAGU_MQ_ENAMETOOLONG (-36L)
@@ -80,7 +81,29 @@ struct dagu_mq_queue {
     long msgsize;
     unsigned int count;
     struct dagu_mq_message *head;
+    /* SIGEV_SIGNAL registration; zero pid means no registration. */
+    int notify_pid;
+    unsigned int notify_sig;
+    unsigned long notify_value;
 };
+
+/* The first three members of struct sigevent; the thread part is unused. */
+struct dagu_sigevent {
+    unsigned long value;
+    int signo;
+    int notify;
+};
+
+#define DAGU_SIGEV_SIGNAL 0
+#define DAGU_SIGEV_NONE   1
+#define DAGU_SIGEV_THREAD 2
+#define DAGU_SI_MESGQ     (-4)
+#define DAGU_SIGINFO_SIZE 128U
+#define DAGU_SIGINFO_SIGNO  0x00U
+#define DAGU_SIGINFO_CODE   0x08U
+#define DAGU_SIGINFO_PID    0x10U
+#define DAGU_SIGINFO_UID    0x14U
+#define DAGU_SIGINFO_VALUE  0x18U
 
 struct dagu_mq_timespec {
     long long tv_sec;
@@ -107,6 +130,12 @@ typedef void (*ktime_real_fn)(struct dagu_mq_timespec *);
 typedef int (*anon_inode_getfd_fn)(const char *, const void *, void *, int);
 typedef void *(*fget_fn)(unsigned int);
 typedef void (*fput_fn)(void *);
+typedef int (*task_pid_nr_fn)(void *, int, void *);
+typedef void *(*find_get_pid_fn)(int);
+typedef void *(*get_pid_task_fn)(void *, int);
+typedef void (*put_pid_fn)(void *);
+typedef void (*put_task_struct_fn)(void *);
+typedef int (*send_sig_info_fn)(int, void *, void *);
 
 static kmalloc_fn kmalloc_ptr;
 static kfree_fn kfree_ptr;
@@ -115,10 +144,17 @@ static ktime_real_fn ktime_real_ptr;
 static anon_inode_getfd_fn anon_inode_getfd_ptr;
 static fget_fn fget_ptr;
 static fput_fn fput_ptr;
+static task_pid_nr_fn task_pid_nr_ptr;
+static find_get_pid_fn find_get_pid_ptr;
+static get_pid_task_fn get_pid_task_ptr;
+static put_pid_fn put_pid_ptr;
+static put_task_struct_fn put_task_struct_ptr;
+static send_sig_info_fn send_sig_info_ptr;
 
 static struct dagu_mq_fops dagu_mq_fops = { { 0 }, 0 };
 
 static int dagu_mq_release(void *inode, void *file);
+static void mq_send_notification(int pid, unsigned int signo, unsigned long value);
 
 /* No libc: this object is linked into the KPM and only kernel symbols resolve. */
 static unsigned long mq_strlen(const char *text)
@@ -245,8 +281,17 @@ int dagu_mq_core_bind(void)
     anon_inode_getfd_ptr = (anon_inode_getfd_fn)kallsyms_lookup_name("anon_inode_getfd");
     fget_ptr = (fget_fn)kallsyms_lookup_name("fget");
     fput_ptr = (fput_fn)kallsyms_lookup_name("fput");
+    task_pid_nr_ptr = (task_pid_nr_fn)kallsyms_lookup_name("__task_pid_nr_ns");
+    find_get_pid_ptr = (find_get_pid_fn)kallsyms_lookup_name("find_get_pid");
+    get_pid_task_ptr = (get_pid_task_fn)kallsyms_lookup_name("get_pid_task");
+    put_pid_ptr = (put_pid_fn)kallsyms_lookup_name("put_pid");
+    put_task_struct_ptr =
+        (put_task_struct_fn)kallsyms_lookup_name("__put_task_struct");
+    send_sig_info_ptr = (send_sig_info_fn)kallsyms_lookup_name("send_sig_info");
     if (!kmalloc_ptr || !kfree_ptr || !sleep_ptr || !ktime_real_ptr ||
-        !anon_inode_getfd_ptr || !fget_ptr || !fput_ptr)
+        !anon_inode_getfd_ptr || !fget_ptr || !fput_ptr ||
+        !task_pid_nr_ptr || !find_get_pid_ptr || !get_pid_task_ptr ||
+        !put_pid_ptr || !put_task_struct_ptr || !send_sig_info_ptr)
         return -2;
 
     dagu_mq_fops.release = dagu_mq_release;
@@ -499,6 +544,9 @@ long dagu_mq_timedsend(int mqdes, const char *user_msg, unsigned long length,
     void *file = 0;
     long deadline;
     long result = 0;
+    int notify_pid = 0;
+    unsigned int notify_sig = 0;
+    unsigned long notify_value = 0;
 
     queue = queue_from_fd(mqdes, &file, &result);
     if (!queue)
@@ -532,8 +580,17 @@ long dagu_mq_timedsend(int mqdes, const char *user_msg, unsigned long length,
     for (;;) {
         dagu_ipc_namespace_lock(ns);
         if (queue->count < (unsigned int)queue->maxmsg) {
+            /* A message arriving on an empty queue fires the registration. */
+            if (queue->count == 0 && queue->notify_pid) {
+                notify_pid = queue->notify_pid;
+                notify_sig = queue->notify_sig;
+                notify_value = queue->notify_value;
+                queue->notify_pid = 0;
+            }
             insert_message(queue, message);
             dagu_ipc_namespace_unlock(ns);
+            if (notify_pid)
+                mq_send_notification(notify_pid, notify_sig, notify_value);
             break;
         }
         dagu_ipc_namespace_unlock(ns);
@@ -631,19 +688,100 @@ long dagu_mq_timedreceive(int mqdes, char *user_buffer, unsigned long length,
     return (long)received;
 }
 
+
+static int mq_current_pid(void)
+{
+    return task_pid_nr_ptr(current, 1, 0);
+}
+
+/*
+ * Send the registration's signal. The siginfo is laid out the way the kernel
+ * reads it for SI_MESGQ: signo, code, and the realtime fields at their
+ * offsets in struct siginfo.
+ */
+static void mq_send_notification(int pid, unsigned int signo, unsigned long value)
+{
+    unsigned char info[DAGU_SIGINFO_SIZE] __attribute__((aligned(8)));
+    void *upid;
+    void *task;
+    unsigned int i;
+
+    if (!signo || pid <= 0)
+        return;
+    for (i = 0; i < DAGU_SIGINFO_SIZE; ++i)
+        info[i] = 0;
+    dagu_store_u32(info, DAGU_SIGINFO_SIGNO, signo);
+    dagu_store_u32(info, DAGU_SIGINFO_CODE, (unsigned int)DAGU_SI_MESGQ);
+    dagu_store_u32(info, DAGU_SIGINFO_PID, (unsigned int)mq_current_pid());
+    dagu_store_u32(info, DAGU_SIGINFO_UID, 0U);
+    dagu_store_ptr(info, DAGU_SIGINFO_VALUE, (void *)value);
+
+    upid = find_get_pid_ptr(pid);
+    if (!upid)
+        return;
+    task = get_pid_task_ptr(upid, 0);
+    put_pid_ptr(upid);
+    if (!task)
+        return;
+    send_sig_info_ptr((int)signo, info, task);
+    /*
+     * put_task_struct() is an inline on this kernel; drop the usage count the
+     * same way and hand the last reference to the out-of-line destructor.
+     */
+    if (__atomic_sub_fetch(
+            (unsigned int *)((char *)task + DAGU_TASK_USAGE), 1U,
+            __ATOMIC_ACQ_REL) == 0U)
+        put_task_struct_ptr(task);
+}
+
 long dagu_mq_notify(int mqdes, const void *user_sigevent)
 {
     struct dagu_mq_queue *queue;
+    struct dagu_ipc_namespace *ns;
+    struct dagu_sigevent event;
     void *file = 0;
     long result = 0;
 
-    (void)user_sigevent;
     queue = queue_from_fd(mqdes, &file, &result);
     if (!queue)
         return result;
+    ns = queue->ns;
+
+    if (user_sigevent) {
+        if (dagu_copy_from_user(&event, user_sigevent, sizeof(event)) != 0UL) {
+            fput_ptr(file);
+            return DAGU_MQ_EFAULT;
+        }
+        if (event.notify == DAGU_SIGEV_THREAD ||
+            event.notify < DAGU_SIGEV_SIGNAL ||
+            event.notify > DAGU_SIGEV_NONE) {
+            fput_ptr(file);
+            return DAGU_MQ_EINVAL;
+        }
+        if (event.notify == DAGU_SIGEV_SIGNAL &&
+            (event.signo <= 0 || event.signo > 64)) {
+            fput_ptr(file);
+            return DAGU_MQ_EINVAL;
+        }
+    }
+
+    dagu_ipc_namespace_lock(ns);
+    if (!user_sigevent) {
+        if (!queue->notify_pid)
+            result = DAGU_MQ_EINVAL;
+        else
+            queue->notify_pid = 0;
+    } else if (queue->notify_pid) {
+        result = DAGU_MQ_EBUSY;
+    } else {
+        queue->notify_pid = mq_current_pid();
+        queue->notify_sig = (event.notify == DAGU_SIGEV_SIGNAL) ?
+                            (unsigned int)event.signo : 0U;
+        queue->notify_value = event.value;
+    }
+    dagu_ipc_namespace_unlock(ns);
     fput_ptr(file);
-    /* Signal delivery needs the signal machinery this module does not carry. */
-    return DAGU_MQ_ENOSYS;
+    return result;
 }
 
 long dagu_mq_getsetattr(int mqdes, const void *user_new, void *user_old)
